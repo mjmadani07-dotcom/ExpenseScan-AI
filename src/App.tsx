@@ -749,6 +749,7 @@ export default function App() {
 
             {activeTab === 'capture' && !pendingDrafts && (
               <CaptureWorkspace
+                displayUnit={displayUnit}
                 categories={activeCategories}
                 rates={ledger.rates}
                 aiConfig={ledger.aiConfig ?? { provider: 'gemini', model: 'gemini-4-hydrogen' }}
@@ -770,6 +771,7 @@ export default function App() {
 
             {activeTab === 'capture' && pendingDrafts && (
               <DraftReviewPanel
+                displayUnit={displayUnit}
                 drafts={pendingDrafts}
                 previewPages={previewPages}
                 existingExpenses={ledger.expenses}
@@ -817,6 +819,7 @@ export default function App() {
 
             {activeTab === 'settings' && (
               <SettingsBudgets
+                displayUnit={displayUnit}
                 categories={activeCategories}
                 budgets={ledger.budgets}
                 rates={ledger.rates}

@@ -308,9 +308,9 @@ export function normalizeToToman(
   if (!Number.isFinite(amount)) return 0;
   switch (currency) {
     case 'IRT':
-      return Math.round(amount);
+      return amount;
     case 'IRR':
-      return Math.round(amount / 10);
+      return amount / 10;
     case 'USD': {
       const rate = documentExchangeRate && documentExchangeRate > 0 ? documentExchangeRate : rates.USD;
       return Math.round(amount * rate);
@@ -325,9 +325,26 @@ export function normalizeToToman(
 }
 
 export function convertTomanToDisplayUnit(amountIRT: number, displayUnit: DisplayUnit): number {
-  return displayUnit === 'IRR' ? Math.round(amountIRT * 10) : Math.round(amountIRT);
+  return displayUnit === 'IRR' ? Math.round(amountIRT * 10) : Math.round(amountIRT * 10) / 10;
 }
 
+// Display and entry units never change the stored source currency.
+export function getEntryCurrency(source: Currency, displayUnit: DisplayUnit): Currency {
+  return source === 'IRR' || source === 'IRT' ? displayUnit : source;
+}
+export function toEntryAmount(amount: number, source: Currency, displayUnit: DisplayUnit): number {
+  if (source === 'IRR' && displayUnit === 'IRT') return amount / 10;
+  if (source === 'IRT' && displayUnit === 'IRR') return Math.round(amount * 10);
+  return amount;
+}
+export function fromEntryAmount(amount: number, source: Currency, displayUnit: DisplayUnit): number {
+  if (source === 'IRR' && displayUnit === 'IRT') return Math.round(amount * 10);
+  if (source === 'IRT' && displayUnit === 'IRR') return amount / 10;
+  return amount;
+}
+export function formatDisplayAmount(amount: number, currency: Currency, rates: ExchangeRates, displayUnit: DisplayUnit, historicalRate?: number): string {
+  return formatCurrency(convertTomanToDisplayUnit(normalizeToToman(amount, currency, rates, historicalRate), displayUnit), displayUnit);
+}
 export function convertRialTomanValues(params: {
   amount: number;
   taxAmount: number;
@@ -349,7 +366,7 @@ export function convertRialTomanValues(params: {
     return { amount, taxAmount, discountAmount, lineItems, paymentTranches, currency: toCurrency };
   }
   const factor = fromCurrency === 'IRR' && toCurrency === 'IRT' ? 0.1 : 10;
-  const scale = (n: number) => Math.round(n * factor);
+  const scale = (n: number) => fromCurrency === 'IRR' ? n / 10 : Math.round(n * factor);
   return {
     currency: toCurrency,
     amount: scale(amount),
@@ -483,8 +500,8 @@ export function formatCurrency(
   const rounded =
     currency === 'USD' || currency === 'EUR'
       ? Math.round(amount * 100) / 100
-      : Math.round(amount);
-  const formatted = rounded.toLocaleString('en-US');
+      : currency === 'IRT' ? Math.round(amount * 10) / 10 : Math.round(amount);
+  const formatted = rounded.toLocaleString('en-US', { maximumFractionDigits: 2 });
   const numStr = persianDigits ? toPersianDigits(formatted) : formatted;
   return `${numStr} ${CURRENCY_LABELS[currency]}`;
 }
@@ -505,7 +522,7 @@ export function formatCompactCurrency(
     const val = (abs / 1_000_000).toFixed(1).replace(/\.0$/, '');
     return `${sign}${toPersianDigits(val)} میلیون ${unitLabel}`;
   }
-  return `${sign}${toPersianDigits(Math.round(abs).toLocaleString('en-US'))} ${unitLabel}`;
+  return `${sign}${toPersianDigits(abs.toLocaleString('en-US', { maximumFractionDigits: 1 }))} ${unitLabel}`;
 }
 
 export function formatCompactToman(amountIRT: number): string {

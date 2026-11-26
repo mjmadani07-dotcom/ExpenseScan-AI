@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ChevronDown, ChevronUp, Plus, Split, Trash2 } from 'lucide-react';
 import type {
   Currency,
+  DisplayUnit,
   ExchangeRates,
   PaymentMethod,
   PaymentStatus,
@@ -10,7 +11,11 @@ import type {
 } from '../types/expense';
 import {
   PAYMENT_METHOD_LABELS,
-  formatCurrency,
+  formatDisplayAmount,
+  getEntryCurrency,
+  toEntryAmount,
+  fromEntryAmount,
+  CURRENCY_LABELS,
   summarizeExpensePayments,
 } from '../utils/finance';
 import { formatJalaliDate, toPersianDigits } from '../utils/jalali';
@@ -20,6 +25,7 @@ interface PaymentTranchesEditorProps {
   idPrefix: string;
   totalAmount: number;
   currency: Currency;
+  displayUnit: DisplayUnit;
   rates: ExchangeRates;
   documentExchangeRate?: number;
   baseDate: string;
@@ -44,6 +50,7 @@ export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
   idPrefix,
   totalAmount,
   currency,
+  displayUnit,
   rates,
   documentExchangeRate,
   baseDate,
@@ -296,13 +303,13 @@ export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
           <div className="rounded-xl bg-slate-50 border border-slate-200 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs tabular-nums">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <span className="text-emerald-700 font-semibold">
-                پرداخت‌شده: {formatCurrency(summary.paidInDocCurrency, currency)}
+                پرداخت‌شده: {formatDisplayAmount(summary.paidInDocCurrency, currency, rates, displayUnit, documentExchangeRate)}
               </span>
               <span className="text-amber-700 font-semibold">
-                مانده تسویه: {formatCurrency(summary.remainingInDocCurrency, currency)}
+                مانده تسویه: {formatDisplayAmount(summary.remainingInDocCurrency, currency, rates, displayUnit, documentExchangeRate)}
               </span>
               <span className="text-slate-600">
-                جمع بخش‌ها: {formatCurrency(summary.tranchesTotalInDocCurrency, currency)}
+                جمع بخش‌ها: {formatDisplayAmount(summary.tranchesTotalInDocCurrency, currency, rates, displayUnit, documentExchangeRate)}
               </span>
             </div>
 
@@ -312,7 +319,7 @@ export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
                 onClick={() => handleAddTranche(true)}
                 className="text-[11px] font-semibold text-teal-700 hover:text-teal-900 underline cursor-pointer"
               >
-                ثبت مانده ({formatCurrency(summary.unallocatedInDocCurrency, currency)}) به عنوان چک/قسط جدید
+                ثبت مانده ({formatDisplayAmount(summary.unallocatedInDocCurrency, currency, rates, displayUnit, documentExchangeRate)}) به عنوان چک/قسط جدید
               </button>
             )}
 
@@ -367,16 +374,16 @@ export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
                       htmlFor={`${idPrefix}-tr-amount-${tr.id}`}
                       className="block text-[11px] font-semibold text-slate-600 mb-1"
                     >
-                      مبلغ این بخش
+                      مبلغ این بخش ({CURRENCY_LABELS[getEntryCurrency(currency, displayUnit)]})
                     </label>
                     <input
                       id={`${idPrefix}-tr-amount-${tr.id}`}
                       type="number"
                       min={0}
                       step="any"
-                      value={tr.amount}
+                      value={toEntryAmount(tr.amount, currency, displayUnit)}
                       onChange={(e) =>
-                        updateTranche(tr.id, { amount: Number(e.target.value) || 0 })
+                        updateTranche(tr.id, { amount: fromEntryAmount(Number(e.target.value) || 0, currency, displayUnit) })
                       }
                       className="w-full min-h-[38px] rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
                     />

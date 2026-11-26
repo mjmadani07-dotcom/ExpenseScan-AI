@@ -23,6 +23,7 @@ import type {
   CategoryBudget,
   CategoryDefinition,
   ExchangeRates,
+  DisplayUnit,
   ExpenseCategory,
   ExpenseRecord,
   JsonImportMode,
@@ -30,6 +31,9 @@ import type {
 } from '../types/expense';
 import {
   CATEGORY_PALETTE_COLORS,
+  CURRENCY_LABELS,
+  toEntryAmount,
+  fromEntryAmount,
   countSeedExpenses,
   resolveCategories,
 } from '../utils/finance';
@@ -43,6 +47,7 @@ interface SettingsBudgetsProps {
   categories: CategoryDefinition[];
   budgets: CategoryBudget[];
   rates: ExchangeRates;
+  displayUnit: DisplayUnit;
   expenses: ExpenseRecord[];
   aiConfig: AiConfig;
   aiStatus: AiProviderStatus | null;
@@ -104,6 +109,7 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
   categories,
   budgets,
   rates,
+  displayUnit,
   expenses,
   aiConfig,
   aiStatus,
@@ -758,7 +764,7 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
       {/* Exchange Rates */}
       <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
         <div>
-          <h2 className="text-base font-bold text-slate-900">نرخ پیش‌فرض تسعیر ارزهای خارجی (به تومان)</h2>
+          <h2 className="text-base font-bold text-slate-900">نرخ پیش‌فرض تسعیر ارزهای خارجی ({CURRENCY_LABELS[displayUnit]})</h2>
           <p className="mt-1 text-xs text-slate-500">
             این نرخ‌ها به عنوان پیش‌فرض هنگام ثبت سند ارزی جدید استفاده می‌شوند؛ اسناد ثبت‌شده قبلی نرخ تاریخی خود را حفظ می‌کنند.
           </p>
@@ -766,30 +772,30 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="rate-usd" className="block text-xs font-semibold text-slate-700 mb-1.5">
-              نرخ هر ۱ دلار آمریکا (تومان)
+              نرخ هر ۱ دلار آمریکا ({CURRENCY_LABELS[displayUnit]})
             </label>
             <input
               id="rate-usd"
               type="number"
               min={1000}
-              value={localRates.USD}
+              value={toEntryAmount(localRates.USD, 'IRT', displayUnit)}
               onChange={(e) =>
-                setLocalRates((r) => ({ ...r, USD: Number(e.target.value) || 0 }))
+                setLocalRates((r) => ({ ...r, USD: fromEntryAmount(Number(e.target.value) || 0, 'IRT', displayUnit) }))
               }
               className="w-full min-h-[42px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
             />
           </div>
           <div>
             <label htmlFor="rate-eur" className="block text-xs font-semibold text-slate-700 mb-1.5">
-              نرخ هر ۱ یورو (تومان)
+              نرخ هر ۱ یورو ({CURRENCY_LABELS[displayUnit]})
             </label>
             <input
               id="rate-eur"
               type="number"
               min={1000}
-              value={localRates.EUR}
+              value={toEntryAmount(localRates.EUR, 'IRT', displayUnit)}
               onChange={(e) =>
-                setLocalRates((r) => ({ ...r, EUR: Number(e.target.value) || 0 }))
+                setLocalRates((r) => ({ ...r, EUR: fromEntryAmount(Number(e.target.value) || 0, 'IRT', displayUnit) }))
               }
               className="w-full min-h-[42px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
             />
@@ -876,15 +882,15 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
 
             <div className="sm:col-span-3">
               <label htmlFor="new-category-budget" className="block text-[11px] font-semibold text-slate-700 mb-1">
-                بودجه ماهانه (تومان)
+                بودجه ماهانه ({CURRENCY_LABELS[displayUnit]})
               </label>
               <input
                 id="new-category-budget"
                 type="number"
                 min={0}
                 step={500000}
-                value={newCatBudget}
-                onChange={(e) => setNewCatBudget(Number(e.target.value) || 0)}
+                value={toEntryAmount(newCatBudget, 'IRT', displayUnit)}
+                onChange={(e) => setNewCatBudget(fromEntryAmount(Number(e.target.value) || 0, 'IRT', displayUnit))}
                 className="w-full min-h-[40px] rounded-xl border border-slate-200 bg-white px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
               />
             </div>
@@ -1115,15 +1121,15 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
                           htmlFor={`budget-${cat.id}`}
                           className="block text-[11px] font-semibold text-slate-600 mb-1"
                         >
-                          سقف بودجه ماهانه (تومان)
+                          سقف بودجه ماهانه ({CURRENCY_LABELS[displayUnit]})
                         </label>
                         <input
                           id={`budget-${cat.id}`}
                           type="number"
                           min={0}
                           step={500000}
-                          value={val}
-                          onChange={(e) => handleBudgetChange(cat.id, Number(e.target.value) || 0)}
+                          value={toEntryAmount(val, 'IRT', displayUnit)}
+                          onChange={(e) => handleBudgetChange(cat.id, fromEntryAmount(Number(e.target.value) || 0, 'IRT', displayUnit))}
                           className="w-full min-h-[40px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
                         />
                       </div>

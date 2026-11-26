@@ -45,12 +45,11 @@ import {
   SORT_BY_LABELS,
   computePurchaserBreakdown,
   convertRialTomanValues,
-  convertTomanToDisplayUnit,
   countSeedExpenses,
   derivePaymentStatusFromTranches,
   filterExpenses,
   formatCompactCurrency,
-  formatCurrency,
+  formatDisplayAmount,
   getCategoryLabel,
   getUniquePurchasers,
   normalizePurchaserName,
@@ -806,11 +805,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                 <tbody className="divide-y divide-slate-100 text-sm">
                   {filtered.map((exp) => {
                     const paySummary = summarizeExpensePayments(exp, rates);
-                    const eqDisplay = convertTomanToDisplayUnit(paySummary.totalIRT, displayUnit);
-                    const docRate =
-                      exp.currency === 'USD' || exp.currency === 'EUR'
-                        ? exp.exchangeRateToToman ?? rates[exp.currency]
-                        : undefined;
+
                     const trancheCount = exp.paymentTranches?.length ?? 0;
                     return (
                       <tr
@@ -869,14 +864,8 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                         </td>
                         <td className="py-3.5 px-4 text-left whitespace-nowrap">
                           <div className="font-bold text-slate-900 tabular-nums">
-                            {formatCurrency(exp.amount, exp.currency)}
+                            {formatDisplayAmount(exp.amount, exp.currency, rates, displayUnit, exp.exchangeRateToToman)}
                           </div>
-                          {exp.currency !== displayUnit && (
-                            <div className="text-[11px] text-slate-400 tabular-nums">
-                              {formatCurrency(eqDisplay, displayUnit)}
-                              {docRate ? ` · نرخ ${toPersianDigits(docRate.toLocaleString('en-US'))}` : ''}
-                            </div>
-                          )}
                         </td>
                       </tr>
                     );
@@ -889,7 +878,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
             <div className="md:hidden divide-y divide-slate-100">
               {filtered.map((exp) => {
                 const paySummary = summarizeExpensePayments(exp, rates);
-                const eqDisplay = convertTomanToDisplayUnit(paySummary.totalIRT, displayUnit);
+
                 return (
                   <button
                     key={exp.id}
@@ -919,13 +908,8 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                     </div>
                     <div className="text-left shrink-0">
                       <div className="text-sm font-bold text-slate-900 tabular-nums">
-                        {formatCurrency(exp.amount, exp.currency)}
+                        {formatDisplayAmount(exp.amount, exp.currency, rates, displayUnit, exp.exchangeRateToToman)}
                       </div>
-                      {exp.currency !== displayUnit && (
-                        <div className="text-[11px] text-slate-400 tabular-nums">
-                          {formatCurrency(eqDisplay, displayUnit)}
-                        </div>
-                      )}
                       <div
                         className={`mt-0.5 text-[11px] font-semibold ${
                           exp.paymentStatus === 'paid'
@@ -1033,6 +1017,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
             {isEditingFull ? (
               <ExpenseEditForm
                 expense={selectedExpense}
+                displayUnit={displayUnit}
                 categories={activeCategories}
                 rates={rates}
                 purchaserSuggestions={uniquePurchasers}
@@ -1052,17 +1037,8 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                     <div>
                       <div className="text-xs text-slate-500">مبلغ کل سند</div>
                       <div className="mt-1 text-xl font-bold text-slate-900 tabular-nums">
-                        {formatCurrency(selectedExpense.amount, selectedExpense.currency)}
+                        {formatDisplayAmount(selectedExpense.amount, selectedExpense.currency, rates, displayUnit, selectedExpense.exchangeRateToToman)}
                       </div>
-                      {selectedExpense.currency !== displayUnit && (
-                        <div className="text-xs text-slate-500 mt-0.5 tabular-nums">
-                          معادل{' '}
-                          {formatCurrency(
-                            convertTomanToDisplayUnit(selectedSummary.totalIRT, displayUnit),
-                            displayUnit
-                          )}
-                        </div>
-                      )}
                     </div>
                     <div className="text-left">
                       <div className="text-xs text-slate-500">وضعیت تسویه</div>
@@ -1086,10 +1062,10 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                     <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
                       <div className="flex items-center justify-between text-xs tabular-nums">
                         <span className="text-emerald-700 font-semibold">
-                          پرداخت‌شده: {formatCurrency(selectedSummary.paidInDocCurrency, selectedExpense.currency)} ({toPersianDigits(selectedSummary.paidPercent)}٪)
+                          پرداخت‌شده: {formatDisplayAmount(selectedSummary.paidInDocCurrency, selectedExpense.currency, rates, displayUnit, selectedExpense.exchangeRateToToman)} ({toPersianDigits(selectedSummary.paidPercent)}٪)
                         </span>
                         <span className="text-amber-700 font-semibold">
-                          مانده: {formatCurrency(selectedSummary.remainingInDocCurrency, selectedExpense.currency)}
+                          مانده: {formatDisplayAmount(selectedSummary.remainingInDocCurrency, selectedExpense.currency, rates, displayUnit, selectedExpense.exchangeRateToToman)}
                         </span>
                       </div>
                       <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
@@ -1197,6 +1173,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                         idPrefix={`detail-${selectedExpense.id}`}
                         totalAmount={selectedExpense.amount}
                         currency={selectedExpense.currency}
+                        displayUnit={displayUnit}
                         rates={rates}
                         documentExchangeRate={selectedExpense.exchangeRateToToman}
                         baseDate={selectedExpense.date}
@@ -1255,7 +1232,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                           <div className="flex items-center gap-3 shrink-0">
                             <div className="text-left">
                               <div className="font-bold text-slate-900 tabular-nums">
-                                {formatCurrency(tr.amount, selectedExpense.currency)}
+                                {formatDisplayAmount(tr.amount, selectedExpense.currency, rates, displayUnit, selectedExpense.exchangeRateToToman)}
                               </div>
                               <div
                                 className={`text-[11px] font-semibold ${
@@ -1364,9 +1341,9 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                   <div className="p-2.5 rounded-xl bg-slate-50">
                     <dt className="text-slate-500">مالیات / تخفیف</dt>
                     <dd className="mt-1 font-semibold text-slate-900 tabular-nums">
-                      {formatCurrency(selectedExpense.taxAmount, selectedExpense.currency)}
+                      {formatDisplayAmount(selectedExpense.taxAmount, selectedExpense.currency, rates, displayUnit, selectedExpense.exchangeRateToToman)}
                       {selectedExpense.discountAmount > 0
-                        ? ` · تخفیف ${formatCurrency(selectedExpense.discountAmount, selectedExpense.currency)}`
+                        ? ` · تخفیف ${formatDisplayAmount(selectedExpense.discountAmount, selectedExpense.currency, rates, displayUnit, selectedExpense.exchangeRateToToman)}`
                         : ''}
                     </dd>
                   </div>
@@ -1422,7 +1399,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                             {li.description} ({toPersianDigits(li.quantity)} عدد)
                           </span>
                           <span className="font-semibold text-slate-900 tabular-nums">
-                            {formatCurrency(li.totalPrice, selectedExpense.currency)}
+                            {formatDisplayAmount(li.totalPrice, selectedExpense.currency, rates, displayUnit, selectedExpense.exchangeRateToToman)}
                           </span>
                         </div>
                       ))}

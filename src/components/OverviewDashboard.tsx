@@ -28,7 +28,7 @@ import {
   convertTomanToDisplayUnit,
   filterExpenses,
   formatCompactCurrency,
-  formatCurrency,
+  formatDisplayAmount,
   getCategoryColor,
   getCategoryLabel,
   normalizePurchaserName,
@@ -62,9 +62,9 @@ const TIMEFRAME_OPTIONS: { id: TimeframeFilter; label: string }[] = [
 function formatBarShortLabel(amountIRT: number, displayUnit: DisplayUnit): string {
   const val = convertTomanToDisplayUnit(amountIRT, displayUnit);
   if (val >= 1_000_000_000) {
-    return `${toPersianDigits((val / 1_000_000_000).toFixed(1).replace(/\.0$/, ''))}B`;
+    return `${toPersianDigits((val / 1_000_000_000).toFixed(1).replace(/\.0$/, ''))} میلیارد`;
   }
-  return `${toPersianDigits((val / 1_000_000).toFixed(1).replace(/\.0$/, ''))}M`;
+  return `${toPersianDigits((val / 1_000_000).toFixed(1).replace(/\.0$/, ''))} میلیون`;
 }
 
 export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
@@ -529,7 +529,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
             <div className="divide-y divide-slate-100">
               {chartExpenses.slice(0, 5).map((exp) => {
                 const paySummary = summarizeExpensePayments(exp, rates);
-                const eqDisplay = convertTomanToDisplayUnit(paySummary.totalIRT, displayUnit);
+
                 return (
                   <button
                     key={exp.id}
@@ -561,13 +561,8 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
                     </div>
                     <div className="text-left shrink-0">
                       <div className="text-sm font-bold text-slate-900 tabular-nums">
-                        {formatCurrency(exp.amount, exp.currency)}
+                        {formatDisplayAmount(exp.amount, exp.currency, rates, displayUnit, exp.exchangeRateToToman)}
                       </div>
-                      {exp.currency !== displayUnit && (
-                        <div className="text-[11px] text-slate-400 tabular-nums">
-                          {formatCurrency(eqDisplay, displayUnit)}
-                        </div>
-                      )}
                       <div
                         className={`mt-0.5 text-[11px] font-medium ${
                           exp.paymentStatus === 'paid'

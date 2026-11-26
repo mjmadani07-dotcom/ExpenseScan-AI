@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   AlertTriangle,
-  ArrowLeftRight,
   Check,
   Plus,
   Trash2,
@@ -10,6 +9,7 @@ import type {
   CategoryDefinition,
   CostCenter,
   Currency,
+  DisplayUnit,
   DocumentType,
   ExchangeRates,
   ExpenseCategory,
@@ -26,12 +26,13 @@ import {
   DOCUMENT_TYPE_LABELS,
   PAYMENT_METHOD_LABELS,
   PAYMENT_STATUS_LABELS,
-  convertRialTomanValues,
   derivePaymentStatusFromTranches,
-  formatCurrency,
+  formatDisplayAmount,
+  getEntryCurrency,
+  toEntryAmount,
+  fromEntryAmount,
   getCategoryLabel,
   normalizePurchaserName,
-  normalizeToToman,
   resolveCategories,
 } from '../utils/finance';
 import { formatJalaliDate, toPersianDigits } from '../utils/jalali';
@@ -42,6 +43,7 @@ interface ExpenseEditFormProps {
   expense: ExpenseRecord;
   categories?: CategoryDefinition[];
   rates: ExchangeRates;
+  displayUnit: DisplayUnit;
   purchaserSuggestions?: string[];
   isSaving: boolean;
   onSave: (patch: Partial<ExpenseFields>) => Promise<void>;
@@ -52,6 +54,7 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
   expense,
   categories,
   rates,
+  displayUnit,
   purchaserSuggestions = [],
   isSaving,
   onSave,
@@ -93,7 +96,6 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
 
   const isForeign = currency === 'USD' || currency === 'EUR';
   const effectiveRate = isForeign ? exchangeRateToToman ?? rates[currency] : undefined;
-  const tomanEquivalent = normalizeToToman(amount, currency, rates, effectiveRate);
 
   const handleCurrencyChange = (nextCurrency: Currency) => {
     setCurrency(nextCurrency);
@@ -103,28 +105,6 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
       );
     } else {
       setExchangeRateToToman(undefined);
-    }
-  };
-
-  const handleConvertRialToman = () => {
-    if (currency !== 'IRR' && currency !== 'IRT') return;
-    const toCurrency = currency === 'IRR' ? 'IRT' : 'IRR';
-    const converted = convertRialTomanValues({
-      amount,
-      taxAmount,
-      discountAmount,
-      lineItems,
-      paymentTranches,
-      fromCurrency: currency,
-      toCurrency,
-    });
-    setCurrency(converted.currency);
-    setAmount(converted.amount);
-    setTaxAmount(converted.taxAmount);
-    setDiscountAmount(converted.discountAmount);
-    setLineItems(converted.lineItems);
-    if (converted.paymentTranches) {
-      setPaymentTranches(converted.paymentTranches);
     }
   };
 
@@ -259,7 +239,7 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
 
         <div>
           <label htmlFor={`edit-amount-${expense.id}`} className="block text-xs font-semibold text-slate-700 mb-1">
-            مبلغ کل ({CURRENCY_LABELS[currency]}) *
+            مبلغ کل ({CURRENCY_LABELS[getEntryCurrency(currency, displayUnit)]}) *
           </label>
           <input
             id={`edit-amount-${expense.id}`}
@@ -267,13 +247,13 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
             min={0}
             step="any"
             required
-            value={amount}
-            onChange={(e) => setAmount(Number(e.target.value) || 0)}
+            value={toEntryAmount(amount, currency, displayUnit)}
+            onChange={(e) => setAmount(fromEntryAmount(Number(e.target.value) || 0, currency, displayUnit))}
             className="w-full min-h-[40px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
           />
-          {currency !== 'IRT' && (
+          {isForeign && (
             <span className="block mt-1 text-[11px] text-slate-500 tabular-nums">
-              معادل تومانی: {formatCurrency(tomanEquivalent, 'IRT')}
+              معادل: {formatDisplayAmount(amount, currency, rates, displayUnit, effectiveRate)}
             </span>
           )}
         </div>
@@ -294,18 +274,6 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
               </option>
             ))}
           </select>
-          {(currency === 'IRR' || currency === 'IRT') && (
-            <button
-              type="button"
-              onClick={handleConvertRialToman}
-              className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-teal-700 hover:text-teal-900 cursor-pointer"
-            >
-              <ArrowLeftRight className="w-3.5 h-3.5" />
-              <span>
-                {currency === 'IRR' ? 'تبدیل مبالغ به تومان (÷۱۰)' : 'تبدیل مبالغ به ریال (×۱۰)'}
-              </span>
-            </button>
-          )}
         </div>
 
         {isForeign && (
@@ -328,30 +296,30 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
 
         <div>
           <label htmlFor={`edit-tax-${expense.id}`} className="block text-xs font-semibold text-slate-700 mb-1">
-            مالیات ارزش افزوده ({CURRENCY_LABELS[currency]})
+            مالیات ارزش افزوده ({CURRENCY_LABELS[getEntryCurrency(currency, displayUnit)]})
           </label>
           <input
             id={`edit-tax-${expense.id}`}
             type="number"
             min={0}
             step="any"
-            value={taxAmount}
-            onChange={(e) => setTaxAmount(Number(e.target.value) || 0)}
+            value={toEntryAmount(taxAmount, currency, displayUnit)}
+            onChange={(e) => setTaxAmount(fromEntryAmount(Number(e.target.value) || 0, currency, displayUnit))}
             className="w-full min-h-[40px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
           />
         </div>
 
         <div>
           <label htmlFor={`edit-discount-${expense.id}`} className="block text-xs font-semibold text-slate-700 mb-1">
-            تخفیف ({CURRENCY_LABELS[currency]})
+            تخفیف ({CURRENCY_LABELS[getEntryCurrency(currency, displayUnit)]})
           </label>
           <input
             id={`edit-discount-${expense.id}`}
             type="number"
             min={0}
             step="any"
-            value={discountAmount}
-            onChange={(e) => setDiscountAmount(Number(e.target.value) || 0)}
+            value={toEntryAmount(discountAmount, currency, displayUnit)}
+            onChange={(e) => setDiscountAmount(fromEntryAmount(Number(e.target.value) || 0, currency, displayUnit))}
             className="w-full min-h-[40px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
           />
         </div>
@@ -564,6 +532,7 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
         idPrefix={`edit-full-${expense.id}`}
         totalAmount={amount}
         currency={currency}
+         displayUnit={displayUnit}
         rates={rates}
         documentExchangeRate={effectiveRate}
         baseDate={date}
@@ -625,12 +594,12 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
             />
             <input
               type="number"
-              aria-label={`فی قلم ${idx + 1}`}
+              aria-label={`فی قلم ${idx + 1} (${CURRENCY_LABELS[getEntryCurrency(currency, displayUnit)]})`}
               min={0}
               step="any"
-              value={li.unitPrice}
+              value={toEntryAmount(li.unitPrice, currency, displayUnit)}
               onChange={(e) => {
-                const up = Number(e.target.value) || 0;
+                const up = fromEntryAmount(Number(e.target.value) || 0, currency, displayUnit);
                 const next = [...lineItems];
                 next[idx] = { ...li, unitPrice: up, totalPrice: li.quantity * up };
                 setLineItems(next);

@@ -20,6 +20,7 @@ import {
 import type {
   AiConfig,
   AiProviderId,
+  DisplayUnit,
   AiProviderStatus,
   CategoryDefinition,
   ExchangeRates,
@@ -41,6 +42,7 @@ import { maskApiKey } from '../utils/localKeyVault';
 interface CaptureWorkspaceProps {
   categories?: CategoryDefinition[];
   rates: ExchangeRates;
+  displayUnit: DisplayUnit;
   aiConfig: AiConfig;
   aiStatus: AiProviderStatus | null;
   localApiKeys: Partial<Record<AiProviderId, string>>;
@@ -82,6 +84,7 @@ function formatFileSizeFa(bytes: number): string {
 export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   categories,
   rates,
+  displayUnit,
   aiConfig,
   aiStatus,
   localApiKeys,
@@ -356,7 +359,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           category: defaultCategory,
           costCenter: 'general',
           amount: 0,
-          currency: 'IRT',
+          currency: displayUnit,
           taxAmount: 0,
           discountAmount: 0,
           date: today,

@@ -16,6 +16,10 @@ import {
   computeMonthlyTrend,
   computePurchaserBreakdown,
   convertRialTomanValues,
+  getEntryCurrency,
+  toEntryAmount,
+  fromEntryAmount,
+  formatDisplayAmount,
   convertTomanToDisplayUnit,
   countSeedExpenses,
   createCustomCategoryId,
@@ -813,4 +817,21 @@ test('dynamic categories support CRUD, reassignment on delete, breakdown, export
       }),
     /حداقل یک دسته‌بندی/
   );
+});
+
+test('one global unit preserves the original currency and individual rials', () => {
+  assert.equal(formatDisplayAmount(100000000, 'IRR', SAMPLE_RATES, 'IRT'), '۱۰,۰۰۰,۰۰۰ تومان');
+  assert.equal(formatDisplayAmount(10000000, 'IRT', SAMPLE_RATES, 'IRR'), '۱۰۰,۰۰۰,۰۰۰ ریال');
+  assert.equal(formatDisplayAmount(1, 'IRR', SAMPLE_RATES, 'IRR'), '۱ ریال');
+  assert.equal(formatDisplayAmount(1, 'IRR', SAMPLE_RATES, 'IRT'), '۰.۱ تومان');
+  assert.equal(formatDisplayAmount(2, 'USD', SAMPLE_RATES, 'IRT', 65000), '۱۳۰,۰۰۰ تومان');
+  for (const source of ['IRR','IRT'] as const) {
+    for (const unit of ['IRR','IRT'] as const) {
+      assert.equal(getEntryCurrency(source, unit), unit);
+      assert.equal(fromEntryAmount(toEntryAmount(12345, source, unit), source, unit), 12345);
+    }
+  }
+  assert.equal(getEntryCurrency('USD', 'IRT'), 'USD');
+  assert.equal(fromEntryAmount(123.4, 'IRR', 'IRT'), 1234);
+  assert.equal(fromEntryAmount(1234, 'IRT', 'IRR'), 123.4);
 });

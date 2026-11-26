@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  ArrowLeftRight,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -13,6 +12,7 @@ import type {
   CategoryDefinition,
   CostCenter,
   Currency,
+  DisplayUnit,
   DocumentType,
   ExchangeRates,
   ExpenseCategory,
@@ -29,14 +29,15 @@ import {
   DOCUMENT_TYPE_LABELS,
   PAYMENT_METHOD_LABELS,
   PAYMENT_STATUS_LABELS,
-  convertRialTomanValues,
   derivePaymentStatusFromTranches,
   detectPotentialDuplicates,
-  formatCurrency,
+  formatDisplayAmount,
+  getEntryCurrency,
+  toEntryAmount,
+  fromEntryAmount,
   getCategoryLabel,
   getUniquePurchasers,
   normalizePurchaserName,
-  normalizeToToman,
   resolveCategories,
 } from '../utils/finance';
 import { formatJalaliDate, toPersianDigits } from '../utils/jalali';
@@ -49,6 +50,7 @@ interface DraftReviewPanelProps {
   existingExpenses: ExpenseRecord[];
   categories?: CategoryDefinition[];
   rates: ExchangeRates;
+  displayUnit: DisplayUnit;
   isSaving: boolean;
   saveError: string | null;
   onUpdateDrafts: (updated: ExtractedExpenseDraft[]) => void;
@@ -63,6 +65,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
   existingExpenses,
   categories,
   rates,
+  displayUnit,
   isSaving,
   saveError,
   onUpdateDrafts,
@@ -106,21 +109,6 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
         exchangeRateToToman: undefined,
       });
     }
-  };
-
-  const handleConvertRialToman = (draft: ExtractedExpenseDraft) => {
-    if (draft.currency !== 'IRR' && draft.currency !== 'IRT') return;
-    const toCurrency = draft.currency === 'IRR' ? 'IRT' : 'IRR';
-    const converted = convertRialTomanValues({
-      amount: draft.amount,
-      taxAmount: draft.taxAmount,
-      discountAmount: draft.discountAmount,
-      lineItems: draft.lineItems,
-      paymentTranches: draft.paymentTranches,
-      fromCurrency: draft.currency,
-      toCurrency,
-    });
-    updateDraft(draft.tempId, converted);
   };
 
   const handleUpdateTranches = (draft: ExtractedExpenseDraft, nextTranches: PaymentTranche[]) => {
@@ -338,12 +326,6 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
               draft.currency === 'USD' || draft.currency === 'EUR'
                 ? draft.exchangeRateToToman ?? rates[draft.currency]
                 : undefined;
-            const tomanEquivalent = normalizeToToman(
-              draft.amount,
-              draft.currency,
-              rates,
-              effectiveRate
-            );
 
             return (
               <div
@@ -462,7 +444,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                       htmlFor={`amount-${draft.tempId}`}
                       className="block text-xs font-semibold text-slate-700 mb-1.5"
                     >
-                      مبلغ کل ({CURRENCY_LABELS[draft.currency]}) *
+                      مبلغ کل ({CURRENCY_LABELS[getEntryCurrency(draft.currency, displayUnit)]}) *
                     </label>
                     <input
                       id={`amount-${draft.tempId}`}
@@ -470,15 +452,15 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                       min={0}
                       step="any"
                       required
-                      value={draft.amount}
+                      value={toEntryAmount(draft.amount, draft.currency, displayUnit)}
                       onChange={(e) =>
-                        updateDraft(draft.tempId, { amount: Number(e.target.value) || 0 })
+                        updateDraft(draft.tempId, { amount: fromEntryAmount(Number(e.target.value) || 0, draft.currency, displayUnit) })
                       }
                       className="w-full min-h-[42px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
                     />
-                    {draft.currency !== 'IRT' && (
+                    {isForeignCurrency && (
                       <span className="block mt-1 text-[11px] text-slate-500 tabular-nums">
-                        معادل: {formatCurrency(tomanEquivalent, 'IRT')}
+                        معادل: {formatDisplayAmount(draft.amount, draft.currency, rates, displayUnit, effectiveRate)}
                       </span>
                     )}
                   </div>
@@ -488,7 +470,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                       htmlFor={`currency-${draft.tempId}`}
                       className="block text-xs font-semibold text-slate-700 mb-1.5"
                     >
-                      واحد پول سند
+                      واحد اصلی سند (مبنای ثبت، نه نمایش)
                     </label>
                     <select
                       id={`currency-${draft.tempId}`}
@@ -504,20 +486,6 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                         </option>
                       ))}
                     </select>
-                    {(draft.currency === 'IRR' || draft.currency === 'IRT') && (
-                      <button
-                        type="button"
-                        onClick={() => handleConvertRialToman(draft)}
-                        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-teal-700 hover:text-teal-900 cursor-pointer"
-                      >
-                        <ArrowLeftRight className="w-3.5 h-3.5" />
-                        <span>
-                          {draft.currency === 'IRR'
-                            ? 'تبدیل مبالغ به تومان (÷۱۰)'
-                            : 'تبدیل مبالغ به ریال (×۱۰)'}
-                        </span>
-                      </button>
-                    )}
                   </div>
 
                   {isForeignCurrency ? (
@@ -704,16 +672,16 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                       htmlFor={`tax-${draft.tempId}`}
                       className="block text-xs font-semibold text-slate-700 mb-1.5"
                     >
-                      مالیات ارزش افزوده ({CURRENCY_LABELS[draft.currency]})
+                      مالیات ارزش افزوده ({CURRENCY_LABELS[getEntryCurrency(draft.currency, displayUnit)]})
                     </label>
                     <input
                       id={`tax-${draft.tempId}`}
                       type="number"
                       min={0}
                       step="any"
-                      value={draft.taxAmount}
+                      value={toEntryAmount(draft.taxAmount, draft.currency, displayUnit)}
                       onChange={(e) =>
-                        updateDraft(draft.tempId, { taxAmount: Number(e.target.value) || 0 })
+                        updateDraft(draft.tempId, { taxAmount: fromEntryAmount(Number(e.target.value) || 0, draft.currency, displayUnit) })
                       }
                       className="w-full min-h-[42px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
                     />
@@ -830,6 +798,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                   idPrefix={draft.tempId}
                   totalAmount={draft.amount}
                   currency={draft.currency}
+                   displayUnit={displayUnit}
                   rates={rates}
                   documentExchangeRate={effectiveRate}
                   baseDate={draft.date}
@@ -899,12 +868,12 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                           />
                           <input
                             type="number"
-                            aria-label={`فی قلم ${liIdx + 1}`}
+                            aria-label={`فی قلم ${liIdx + 1} (${CURRENCY_LABELS[getEntryCurrency(draft.currency, displayUnit)]})`}
                             min={0}
                             step="any"
-                            value={li.unitPrice}
+                            value={toEntryAmount(li.unitPrice, draft.currency, displayUnit)}
                             onChange={(e) => {
-                              const up = Number(e.target.value) || 0;
+                              const up = fromEntryAmount(Number(e.target.value) || 0, draft.currency, displayUnit);
                               const next = [...draft.lineItems];
                               next[liIdx] = {
                                 ...li,
