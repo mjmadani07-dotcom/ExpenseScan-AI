@@ -1,3 +1,4 @@
+import { WebLedgerRepository, type LedgerRepository } from './storage/ledgerRepository';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Camera,
@@ -54,7 +55,8 @@ type ActiveTab = 'overview' | 'capture' | 'ledger' | 'settings';
 const CACHE_KEY = 'hesabyar_ledger_cache_v1';
 const DISPLAY_UNIT_KEY = 'hesabyar_display_unit_v1';
 
-export default function App() {
+const webRepository = new WebLedgerRepository();
+export default function App({ repository = webRepository }: { repository?: LedgerRepository }) {
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit>(() => {
     try {
@@ -104,6 +106,7 @@ export default function App() {
   }, []);
 
   const saveCache = (next: LedgerData) => {
+    if (repository.mode !== 'web') return;
     try {
       localStorage.setItem(CACHE_KEY, JSON.stringify(next));
     } catch {
@@ -114,21 +117,13 @@ export default function App() {
   const loadLedger = useCallback(async () => {
     setLoadError(null);
     try {
-      const [ledgerRes, aiRes] = await Promise.all([
-        fetch('/api/ledger'),
-        fetch('/api/ai/status').catch(() => null),
-      ]);
-      if (!ledgerRes.ok) throw new Error('خطا در دریافت اطلاعات از سرور');
-      const data = (await ledgerRes.json()) as LedgerData;
+      const [data, statusData] = await Promise.all([repository.load(), repository.aiStatus()]);
       setLedger(data);
       setCachedOnly(false);
       saveCache(data);
-      if (aiRes && aiRes.ok) {
-        const statusData = (await aiRes.json()) as AiProviderStatus;
-        setAiStatus(statusData);
-      }
+      setAiStatus(statusData);
     } catch (err) {
-      const cached = localStorage.getItem(CACHE_KEY);
+      const cached = repository.mode === 'web' ? localStorage.getItem(CACHE_KEY) : null;
       if (cached) {
         try {
           setLedger(JSON.parse(cached) as LedgerData);
@@ -142,7 +137,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [repository]);
 
   useEffect(() => {
     loadLedger();
@@ -165,13 +160,7 @@ export default function App() {
     setIsSavingBatch(true);
     setSaveError(null);
     try {
-      const res = await fetch('/api/expenses/batch', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expenses: approvedItems }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'خطا در ذخیره هزینه‌ها');
-      const created = data.created as ExpenseRecord[];
+      const created = await repository.add(approvedItems);
       if (!Array.isArray(created) || created.length !== approvedItems.length) throw new Error('پاسخ ثبت سند نامعتبر است؛ قبل از تلاش مجدد دفتر را بررسی کنید.');
 
       setLedger((prev) => {
@@ -194,15 +183,8 @@ export default function App() {
 
   const handleUpdateExpense = async (id: string, patch: Partial<ExpenseFields>) => {
     try {
-      const res = await fetch(`/api/expenses/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch, (_key, value) => value === undefined ? null : value),
-      });
-      if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.error || 'خطا در ویرایش سند'); }
+      const updated = await repository.update(id, patch);
       {
-        const data = await res.json();
-        const updated = data.expense as ExpenseRecord;
         setLedger((prev) => {
           const next = {
             ...prev,
@@ -233,8 +215,7 @@ export default function App() {
 
   const handleDeleteExpense = async (id: string) => {
     try {
-      const res = await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
-      if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.error || 'خطا در حذف سند'); }
+      await repository.remove(id);
       {
         setLedger((prev) => {
           const next = {
@@ -258,16 +239,7 @@ export default function App() {
     aiConfig: AiConfig
   ) => {
     try {
-      const res = await fetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ budgets, rates, aiConfig }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'خطا در ذخیره تنظیمات');
-      }
-      const updated = data as LedgerData & { aiStatus?: AiProviderStatus };
+      const updated = await repository.settings(budgets, rates, aiConfig);
       const nextLedger: LedgerData = {
         expenses: updated.expenses,
         budgets: updated.budgets,
@@ -291,15 +263,7 @@ export default function App() {
     mode: JsonImportMode
   ): Promise<JsonImportStats> => {
     try {
-      const res = await fetch('/api/ledger/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data, mode }),
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        throw new Error(payload.error || 'خطا در ورود فایل JSON');
-      }
+      const payload = await repository.import(data, mode);
       const nextLedger = payload.ledger as LedgerData;
       const stats = payload.stats as JsonImportStats;
       setLedger(nextLedger);
@@ -318,15 +282,7 @@ export default function App() {
 
   const handleClearLedger = async (scope: 'samples' | 'all'): Promise<number> => {
     try {
-      const res = await fetch('/api/ledger/clear', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope }),
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        throw new Error(payload.error || 'خطا در پاکسازی اسناد');
-      }
+      const payload = await repository.clear(scope);
       const nextLedger = payload.ledger as LedgerData;
       const removedCount = Number(payload.removedCount) || 0;
       setLedger(nextLedger);
@@ -357,15 +313,7 @@ export default function App() {
     monthlyLimitIRT: number;
   }) => {
     try {
-      const res = await fetch('/api/categories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        throw new Error(payload.error || 'خطا در ایجاد دسته‌بندی');
-      }
+      const payload = await repository.addCategory(input);
       const nextLedger = payload.ledger as LedgerData;
       const created = payload.category as CategoryDefinition;
       setLedger(nextLedger);
@@ -381,15 +329,7 @@ export default function App() {
     patch: { label: string; color: string; description?: string }
   ) => {
     try {
-      const res = await fetch(`/api/categories/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        throw new Error(payload.error || 'خطا در ویرایش دسته‌بندی');
-      }
+      const payload = await repository.updateCategory(id, patch);
       const nextLedger = payload.ledger as LedgerData;
       const updated = payload.category as CategoryDefinition;
       setLedger(nextLedger);
@@ -402,15 +342,7 @@ export default function App() {
 
   const handleDeleteCategory = async (id: string, reassignToId?: string) => {
     try {
-      const res = await fetch(`/api/categories/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reassignTo: reassignToId }),
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        throw new Error(payload.error || 'خطا در حذف دسته‌بندی');
-      }
+      const payload = await repository.deleteCategory(id, reassignToId);
       const nextLedger = payload.ledger as LedgerData;
       const reassignedCount = Number(payload.reassignedCount) || 0;
       setLedger(nextLedger);
@@ -586,6 +518,7 @@ export default function App() {
 
             {activeTab === 'capture' && !pendingDrafts && (
               <CaptureWorkspace
+                localMode={repository.mode === 'local'}
                 displayUnit={displayUnit}
                 categories={activeCategories}
                 rates={ledger.rates}
@@ -733,7 +666,7 @@ export default function App() {
         </button>
       </nav>
 
-      <OfflineIndicator />
+      <OfflineIndicator localMode={repository.mode === 'local'} />
     </div>
   );
 }

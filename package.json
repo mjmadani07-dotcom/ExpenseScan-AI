@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "clean": "node -e \"for (const p of ['dist','server.js','dev-dist']) require('node:fs').rmSync(p,{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/utils/finance.test.ts",
+    "test": "tsx --test src/utils/finance.test.ts src/storage/sqliteStore.test.ts",
     "check": "npm run lint && npm test && npm run build"
   },
   "dependencies": {

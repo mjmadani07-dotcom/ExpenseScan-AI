@@ -25,3 +25,6 @@ Use foreign keys, unique constraints and indexes on ledger/date/category/payment
 3. Back up before replace or schema change; import within a transaction. Attachment files need separate staged writes and integrity checks; never trust absolute paths or path traversal.
 4. Backups include versioned metadata, data and attachments; exclude keys by default. Restore preview, checksum, atomic replacement and recovery on interruption. Portable encrypted backup with user-held recovery secret where required.
 5. Keep sample fixtures separate; start operational ledger empty. The baseline data/ledger.json had 11 seed-ID expenses and is removed from tracking on android only; original remains in main/history. Export any existing deployed ledger before upgrading. Existing web storage and its seed initialization are still legacy, to be changed in later phases.
+
+## Phase 2 implementation note
+Schema v1 is a transitional transactional snapshot (`ledger_state`, revision and payload). This keeps existing financial fields intact and prevents partial approval writes. Normalized indexed tables, separate attachment storage, encrypted backups, and migration from v1 remain release gates. The Node test driver is not shipped in Android; the native driver must implement the same SQL transaction and change-count contract.

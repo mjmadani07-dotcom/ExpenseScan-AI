@@ -44,6 +44,7 @@ interface CaptureWorkspaceProps {
   categories?: CategoryDefinition[];
   rates: ExchangeRates;
   displayUnit: DisplayUnit;
+  localMode?: boolean;
   aiConfig: AiConfig;
   aiStatus: AiProviderStatus | null;
   localApiKeys: Partial<Record<AiProviderId, string>>;
@@ -86,6 +87,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   categories,
   rates,
   displayUnit,
+  localMode = false,
   aiConfig,
   aiStatus,
   localApiKeys,
@@ -198,6 +200,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           signal: controller.signal,
         });
       } else {
+        if(localMode) throw new Error('برای تحلیل آنلاین در نسخه مستقل، ابتدا سرویس و روش اتصال را در تنظیمات وارد کنید. ثبت دستی همچنان در دسترس است.');
         const response = await fetch('/api/extract', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
