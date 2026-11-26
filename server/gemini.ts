@@ -4,6 +4,7 @@ import type {
   AiProviderId,
   AiProviderInfo,
   AiProviderStatus,
+  CategoryDefinition,
   ExpenseFields,
   SourceType,
 } from '../src/types/expense.ts';
@@ -12,6 +13,12 @@ import {
   normalizeExtractedExpenseList,
   stripJsonCodeFences,
 } from '../src/utils/aiSchema.ts';
+import {
+  DEFAULT_AI_BASE_URLS,
+  buildGeminiEndpoints,
+  buildOpenAiChatCompletionsUrl,
+  validateServerBaseUrl,
+} from '../src/utils/aiUrls.ts';
 
 export interface ExtractInputImage {
   mimeType: string;
@@ -26,6 +33,8 @@ export interface ExtractRequestPayload {
   fileName?: string;
   provider?: AiProviderId;
   model?: string;
+  baseUrl?: string;
+  categories?: CategoryDefinition[];
 }
 
 export const AI_PROVIDER_CATALOG: AiProviderInfo[] = [
@@ -34,6 +43,7 @@ export const AI_PROVIDER_CATALOG: AiProviderInfo[] = [
     label: 'Google Gemini',
     envVarName: 'GEMINI_API_KEY',
     defaultModel: 'gemini-4-hydrogen',
+    defaultBaseUrl: DEFAULT_AI_BASE_URLS.gemini,
     suggestedModels: ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'],
   },
   {
@@ -41,6 +51,7 @@ export const AI_PROVIDER_CATALOG: AiProviderInfo[] = [
     label: 'OpenAI (ChatGPT)',
     envVarName: 'OPENAI_API_KEY',
     defaultModel: 'gpt-4o-mini',
+    defaultBaseUrl: DEFAULT_AI_BASE_URLS.openai,
     suggestedModels: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'],
   },
   {
@@ -48,6 +59,7 @@ export const AI_PROVIDER_CATALOG: AiProviderInfo[] = [
     label: 'OpenRouter (Multi-Model)',
     envVarName: 'OPENROUTER_API_KEY',
     defaultModel: 'google/gemini-2.5-flash',
+    defaultBaseUrl: DEFAULT_AI_BASE_URLS.openrouter,
     suggestedModels: [
       'google/gemini-2.5-flash',
       'openai/gpt-4o-mini',
@@ -55,10 +67,6 @@ export const AI_PROVIDER_CATALOG: AiProviderInfo[] = [
     ],
   },
 ];
-
-// Hardcoded allowlisted HTTPS endpoints (prevents SSRF)
-const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
-const OPENROUTER_CHAT_COMPLETIONS_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 function isKeyConfigured(val: string | undefined, placeholder?: string): boolean {
   if (!val) return false;
@@ -84,25 +92,37 @@ export function getAiProviderStatus(activeConfig?: AiConfig): AiProviderStatus {
   const model =
     activeConfig?.model && activeConfig.model.trim() ? activeConfig.model.trim() : info.defaultModel;
 
+  const baseUrl =
+    activeConfig?.baseUrls?.[provider] ??
+    (activeConfig?.provider === provider ? activeConfig.baseUrl : undefined);
+
   return {
-    active: { provider, model },
+    active: {
+      provider,
+      model,
+      ...(baseUrl ? { baseUrl } : {}),
+      ...(activeConfig?.baseUrls ? { baseUrls: activeConfig.baseUrls } : {}),
+    },
     configured,
     providers: AI_PROVIDER_CATALOG,
   };
 }
 
-function getGeminiClient(): GoogleGenAI {
+function getGeminiClient(customBaseUrl?: string): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!isKeyConfigured(apiKey, 'MY_GEMINI_API_KEY')) {
     throw new Error('کلید دسترسی Gemini API در تنظیمات سرور (GEMINI_API_KEY) پیکربندی نشده است.');
   }
+  const endpoints = customBaseUrl ? buildGeminiEndpoints('', customBaseUrl) : null;
   return new GoogleGenAI({
     apiKey: apiKey!,
     httpOptions: {
+      ...(endpoints ? { baseUrl: endpoints.sdkBaseUrl } : {}),
       headers: {
         'User-Agent': 'aistudio-build',
       },
     },
+    ...(endpoints?.apiVersion ? { apiVersion: endpoints.apiVersion } : {}),
   });
 }
 
@@ -128,10 +148,11 @@ function formatFriendlyProviderError(providerLabel: string, envName: string, raw
 async function extractWithGemini(
   payload: ExtractRequestPayload,
   selectedModel: string,
-  todayIso: string
+  todayIso: string,
+  customBaseUrl?: string
 ): Promise<Array<Record<string, unknown>>> {
-  const ai = getGeminiClient();
-  const systemInstruction = buildExtractionSystemInstruction(todayIso, false);
+  const ai = getGeminiClient(customBaseUrl);
+  const systemInstruction = buildExtractionSystemInstruction(todayIso, false, payload.categories);
 
   const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
   if (payload.images && payload.images.length > 0) {
@@ -182,6 +203,8 @@ async function extractWithGemini(
               paymentStatus: { type: Type.STRING },
               paymentTranches: {
                 type: Type.ARRAY,
+                description:
+                  'فقط در صورتی پر شود که سند واقعاً دارای پیش‌پرداخت، چک یا پرداخت چندمرحله‌ای باشد؛ برای پرداخت کامل و یکجا حتماً آرایه خالی برگردانید.',
                 items: {
                   type: Type.OBJECT,
                   properties: {
@@ -197,6 +220,7 @@ async function extractWithGemini(
                 },
               },
               dueDate: { type: Type.STRING },
+              purchaser: { type: Type.STRING },
               projectTag: { type: Type.STRING },
               notes: { type: Type.STRING },
               extractionNotes: { type: Type.STRING },
@@ -290,6 +314,7 @@ async function extractWithOpenAiCompatible(params: {
   payload: ExtractRequestPayload;
   model: string;
   todayIso: string;
+  baseUrl?: string;
 }): Promise<Array<Record<string, unknown>>> {
   const isOpenRouter = params.provider === 'openrouter';
   const envName = isOpenRouter ? 'OPENROUTER_API_KEY' : 'OPENAI_API_KEY';
@@ -302,12 +327,16 @@ async function extractWithOpenAiCompatible(params: {
     );
   }
 
-  const endpointUrl = isOpenRouter ? OPENROUTER_CHAT_COMPLETIONS_URL : OPENAI_CHAT_COMPLETIONS_URL;
-  const systemInstruction = buildExtractionSystemInstruction(params.todayIso, true);
+  const endpointUrl = buildOpenAiChatCompletionsUrl(params.provider, params.baseUrl);
+  const systemInstruction = buildExtractionSystemInstruction(
+    params.todayIso,
+    true,
+    params.payload.categories
+  );
   const contextHint = params.payload.fileName ? `نام فایل ورودی: ${params.payload.fileName}\n` : '';
   const textPrompt = params.payload.text?.trim()
     ? `${contextHint}لطفاً هزینه‌ها و جزئیات مالی متن/فایل زیر را استخراج و در JSON با کلید expenses برگردان:\n\n${params.payload.text.trim()}`
-    : `${contextHint}لطفاً تمام اطلاعات مالی، اقلام فاکتور، تاریخ، مبلغ، مالیات، فروشنده و پرداخت‌های مرحله‌ای را از تصویر(های) پیوست‌شده استخراج و در JSON با کلید expenses برگردان.`;
+    : `${contextHint}لطفاً تمام اطلاعات مالی، اقلام فاکتور، تاریخ، مبلغ، مالیات، فروشنده و نحوه تسویه (یکجا، یا در صورت وجود پیش‌پرداخت/چک، بخش‌های پرداخت) را از تصویر(های) پیوست‌شده استخراج و در JSON با کلید expenses برگردان.`;
 
   const userContent: Array<
     { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }
@@ -389,16 +418,18 @@ export async function extractStructuredExpenses(
   const catalogEntry =
     AI_PROVIDER_CATALOG.find((p) => p.id === provider) ?? AI_PROVIDER_CATALOG[0];
   const model = payload.model?.trim() || catalogEntry.defaultModel;
+  const validatedBaseUrl = validateServerBaseUrl(payload.baseUrl);
 
   const list =
     provider === 'gemini'
-      ? await extractWithGemini(payload, model, todayIso)
+      ? await extractWithGemini(payload, model, todayIso, validatedBaseUrl)
       : await extractWithOpenAiCompatible({
           provider,
           payload,
           model,
           todayIso,
+          baseUrl: validatedBaseUrl,
         });
 
-  return normalizeExtractedExpenseList(list, todayIso);
+  return normalizeExtractedExpenseList(list, todayIso, payload.categories);
 }

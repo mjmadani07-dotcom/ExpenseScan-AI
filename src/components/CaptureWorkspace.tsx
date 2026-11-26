@@ -21,6 +21,7 @@ import type {
   AiConfig,
   AiProviderId,
   AiProviderStatus,
+  CategoryDefinition,
   ExchangeRates,
   ExtractedExpenseDraft,
   SourceType,
@@ -31,17 +32,21 @@ import {
   renderPdfToImages,
   type RenderedPage,
 } from '../utils/pdfRenderer';
+import { resolveCategories } from '../utils/finance';
 import { toPersianDigits } from '../utils/jalali';
 import { extractExpensesDirectlyFromBrowser } from '../utils/clientAiExtract';
+import { DEFAULT_AI_BASE_URLS, validateClientBaseUrl } from '../utils/aiUrls';
 import { maskApiKey } from '../utils/localKeyVault';
 
 interface CaptureWorkspaceProps {
+  categories?: CategoryDefinition[];
   rates: ExchangeRates;
   aiConfig: AiConfig;
   aiStatus: AiProviderStatus | null;
   localApiKeys: Partial<Record<AiProviderId, string>>;
   onSaveLocalApiKey: (provider: AiProviderId, key: string) => Promise<void>;
   onRemoveLocalApiKey: (provider: AiProviderId) => Promise<void>;
+  onSaveAiConfig: (nextConfig: AiConfig) => Promise<void>;
   onOpenSettings: () => void;
   onDraftsReady: (drafts: ExtractedExpenseDraft[], previewPages: string[]) => void;
 }
@@ -75,15 +80,18 @@ function formatFileSizeFa(bytes: number): string {
 }
 
 export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
+  categories,
   rates,
   aiConfig,
   aiStatus,
   localApiKeys,
   onSaveLocalApiKey,
   onRemoveLocalApiKey,
+  onSaveAiConfig,
   onOpenSettings,
   onDraftsReady,
 }) => {
+  const activeCategories = resolveCategories(categories);
   const [mode, setMode] = useState<InputMode>('file_photo');
   const [rawText, setRawText] = useState('');
   const [textFileName, setTextFileName] = useState<string | undefined>(undefined);
@@ -95,10 +103,15 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   const [showQuickKeyBox, setShowQuickKeyBox] = useState(false);
   const [quickKeyInput, setQuickKeyInput] = useState('');
   const [showQuickKeyText, setShowQuickKeyText] = useState(false);
+  const [isSavingEndpoint, setIsSavingEndpoint] = useState(false);
 
   useEffect(() => {
     setSelectedAi(aiConfig);
   }, [aiConfig]);
+
+  const activeCustomBaseUrl =
+    selectedAi.baseUrls?.[selectedAi.provider] ??
+    (selectedAi.provider === aiConfig.provider ? selectedAi.baseUrl ?? '' : '');
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -163,11 +176,15 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
         >
       > = [];
 
+      const validatedBaseUrl = validateClientBaseUrl(activeCustomBaseUrl);
+
       if (localKey) {
         extractedList = await extractExpensesDirectlyFromBrowser({
           provider: selectedAi.provider,
           model: selectedAi.model,
           apiKey: localKey,
+          baseUrl: validatedBaseUrl,
+          categories: activeCategories,
           images: params.pages?.map((p) => ({
             mimeType: p.mimeType,
             data: p.base64,
@@ -192,6 +209,8 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
             fileName: params.fileName,
             provider: selectedAi.provider,
             model: selectedAi.model,
+            baseUrl: validatedBaseUrl,
+            categories: activeCategories,
           }),
         });
 
@@ -323,6 +342,9 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
 
   const handleCreateManualDraft = () => {
     const today = new Date().toISOString().slice(0, 10);
+    const defaultCategory = activeCategories.some((c) => c.id === 'operations')
+      ? 'operations'
+      : activeCategories[0]?.id ?? 'other';
     onDraftsReady(
       [
         {
@@ -331,7 +353,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           title: '',
           vendor: '',
           documentType: 'invoice',
-          category: 'operations',
+          category: defaultCategory,
           costCenter: 'general',
           amount: 0,
           currency: 'IRT',
@@ -370,7 +392,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
         </button>
       </div>
 
-      {/* Active AI Provider / Model Quick Switcher + Quick Device Key */}
+      {/* Active AI Provider / Model Quick Switcher + Quick Device Key & Base URL */}
       <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
@@ -384,6 +406,11 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
               <span className="font-semibold text-teal-700">آماده در سرور</span>
             ) : (
               <span className="font-semibold text-amber-700">کلید وارد نشده</span>
+            )}
+            {activeCustomBaseUrl.trim() && (
+              <span className="text-[11px] font-medium text-slate-500">
+                · Base URL سفارشی
+              </span>
             )}
           </div>
 
@@ -401,7 +428,12 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
                     : provId === 'openrouter'
                       ? 'google/gemini-2.5-flash'
                       : 'gemini-4-hydrogen');
-                setSelectedAi({ provider: provId, model: defaultM });
+                setSelectedAi((prev) => ({
+                  ...prev,
+                  provider: provId,
+                  model: defaultM,
+                  baseUrl: prev.baseUrls?.[provId],
+                }));
                 setQuickKeyInput('');
               }}
               className="min-h-[36px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-600"
@@ -425,18 +457,91 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
               className="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1 rounded-lg border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
             >
               <KeyRound className="w-3.5 h-3.5 text-teal-700" />
-              <span>
-                {localApiKeys[selectedAi.provider]
-                  ? 'کلید شخصی دستگاه'
-                  : 'ورود کلید روی دستگاه'}
-              </span>
+              <span>تنظیم کلید و Base URL</span>
             </button>
           </div>
         </div>
 
         {showQuickKeyBox && (
-          <div className="pt-3 border-t border-slate-100 space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="pt-3 border-t border-slate-100 space-y-3">
+            {/* Quick Base URL Editor */}
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <label htmlFor="quick-base-url" className="font-semibold text-slate-700">
+                  آدرس پایه سرور (Base URL) برای {selectedAi.provider.toUpperCase()} (اختیاری)
+                </label>
+                {activeCustomBaseUrl.trim() && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedAi((prev) => {
+                        const nextMap = { ...(prev.baseUrls ?? {}) };
+                        delete nextMap[prev.provider];
+                        return { ...prev, baseUrl: undefined, baseUrls: nextMap };
+                      })
+                    }
+                    className="text-[11px] font-semibold text-slate-600 hover:text-red-600 cursor-pointer"
+                  >
+                    بازنشانی به پیش‌فرض
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  id="quick-base-url"
+                  type="text"
+                  inputMode="url"
+                  dir="ltr"
+                  spellCheck={false}
+                  value={activeCustomBaseUrl}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSelectedAi((prev) => {
+                      const nextMap = { ...(prev.baseUrls ?? {}) };
+                      if (val) nextMap[prev.provider] = val;
+                      else delete nextMap[prev.provider];
+                      return { ...prev, baseUrl: val || undefined, baseUrls: nextMap };
+                    });
+                  }}
+                  placeholder={DEFAULT_AI_BASE_URLS[selectedAi.provider]}
+                  className="flex-1 min-h-[38px] rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-mono-num text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white"
+                />
+                <button
+                  type="button"
+                  disabled={isSavingEndpoint}
+                  onClick={async () => {
+                    setErrorMessage(null);
+                    setIsSavingEndpoint(true);
+                    try {
+                      const clean = validateClientBaseUrl(activeCustomBaseUrl);
+                      const nextMap = { ...(selectedAi.baseUrls ?? {}) };
+                      if (clean) nextMap[selectedAi.provider] = clean;
+                      else delete nextMap[selectedAi.provider];
+                      const nextConfig: AiConfig = {
+                        provider: selectedAi.provider,
+                        model: selectedAi.model.trim() || 'gemini-4-hydrogen',
+                        ...(clean ? { baseUrl: clean } : {}),
+                        ...(Object.keys(nextMap).length > 0 ? { baseUrls: nextMap } : {}),
+                      };
+                      await onSaveAiConfig(nextConfig);
+                      setSelectedAi(nextConfig);
+                    } catch (err) {
+                      setErrorMessage(
+                        err instanceof Error ? err.message : 'آدرس Base URL معتبر نیست'
+                      );
+                    } finally {
+                      setIsSavingEndpoint(false);
+                    }
+                  }}
+                  className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-4 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-40 cursor-pointer shrink-0"
+                >
+                  <Save className="w-3.5 h-3.5 text-teal-700" />
+                  <span>{isSavingEndpoint ? 'در حال ذخیره...' : 'ذخیره مدل و Base URL'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs pt-2 border-t border-slate-100">
               <span className="font-semibold text-slate-700">
                 کلید شخصی محلی برای {selectedAi.provider.toUpperCase()} (فقط در این گوشی/مرورگر ذخیره می‌شود)
               </span>
@@ -503,7 +608,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
                 className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-4 py-1.5 rounded-xl bg-teal-700 text-white text-xs font-semibold hover:bg-teal-800 disabled:opacity-40 cursor-pointer shrink-0"
               >
                 <Save className="w-3.5 h-3.5" />
-                <span>ذخیره روی دستگاه</span>
+                <span>ذخیره کلید روی دستگاه</span>
               </button>
             </div>
           </div>

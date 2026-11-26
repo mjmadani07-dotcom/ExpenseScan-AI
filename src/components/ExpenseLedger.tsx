@@ -12,10 +12,12 @@ import {
   Search,
   Split,
   Trash2,
+  User,
   X,
 } from 'lucide-react';
 import type {
   CategoryBudget,
+  CategoryDefinition,
   CostCenter,
   Currency,
   DisplayUnit,
@@ -34,7 +36,6 @@ import type {
   TimeframeFilter,
 } from '../types/expense';
 import {
-  CATEGORY_LABELS,
   COST_CENTER_LABELS,
   CURRENCY_LABELS,
   DEFAULT_EXPENSE_FILTERS,
@@ -42,15 +43,19 @@ import {
   PAYMENT_METHOD_LABELS,
   PAYMENT_STATUS_LABELS,
   SORT_BY_LABELS,
+  computePurchaserBreakdown,
   convertRialTomanValues,
   convertTomanToDisplayUnit,
   countSeedExpenses,
   derivePaymentStatusFromTranches,
-  exportExpensesToCsv,
   filterExpenses,
   formatCompactCurrency,
   formatCurrency,
+  getCategoryLabel,
+  getUniquePurchasers,
+  normalizePurchaserName,
   normalizeToToman,
+  resolveCategories,
   summarizeExpensePayments,
 } from '../utils/finance';
 import { formatJalaliDate, formatJalaliLong, toPersianDigits } from '../utils/jalali';
@@ -61,11 +66,13 @@ import { PaymentTranchesEditor } from './PaymentTranchesEditor';
 
 interface ExpenseLedgerProps {
   expenses: ExpenseRecord[];
+  categories?: CategoryDefinition[];
   budgets: CategoryBudget[];
   rates: ExchangeRates;
   displayUnit: DisplayUnit;
   onChangeDisplayUnit: (unit: DisplayUnit) => void;
   initialCategory?: ExpenseCategory | 'all';
+  initialPurchaser?: string;
   selectedExpense: ExpenseRecord | null;
   onSelectExpense: (expense: ExpenseRecord | null) => void;
   onTogglePaid: (expense: ExpenseRecord) => Promise<void>;
@@ -85,11 +92,13 @@ const TIMEFRAME_FILTER_LABELS: Record<TimeframeFilter, string> = {
 
 export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
   expenses,
+  categories,
   budgets,
   rates,
   displayUnit,
   onChangeDisplayUnit,
   initialCategory = 'all',
+  initialPurchaser = 'all',
   selectedExpense,
   onSelectExpense,
   onTogglePaid,
@@ -98,15 +107,19 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
   onImportJson,
   onClearSamples,
 }) => {
+  const activeCategories = useMemo(() => resolveCategories(categories), [categories]);
   const [filters, setFilters] = useState<ExpenseFilters>({
     ...DEFAULT_EXPENSE_FILTERS,
     category: initialCategory,
+    purchaser: initialPurchaser,
   });
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [showJsonModal, setShowJsonModal] = useState(false);
   const [confirmClearSamples, setConfirmClearSamples] = useState(false);
   const [isClearingSamples, setIsClearingSamples] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmRemovePreview, setConfirmRemovePreview] = useState(false);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [isMutating, setIsMutating] = useState(false);
   const [rateDraft, setRateDraft] = useState<number>(0);
   const [isEditingTranches, setIsEditingTranches] = useState(false);
@@ -117,8 +130,12 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
   const seedCount = useMemo(() => countSeedExpenses(expenses), [expenses]);
 
   useEffect(() => {
-    setFilters((prev) => ({ ...prev, category: initialCategory }));
-  }, [initialCategory]);
+    setFilters((prev) => ({
+      ...prev,
+      category: initialCategory,
+      purchaser: initialPurchaser,
+    }));
+  }, [initialCategory, initialPurchaser]);
 
   useEffect(() => {
     if (selectedExpense && (selectedExpense.currency === 'USD' || selectedExpense.currency === 'EUR')) {
@@ -129,6 +146,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
     setIsEditingTranches(false);
     setIsEditingFull(false);
     setConfirmDeleteId(null);
+    setConfirmRemovePreview(false);
     setTrancheError(null);
     setTranchesDraft(selectedExpense?.paymentTranches ?? []);
   }, [selectedExpense?.id, rates]);
@@ -150,8 +168,21 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
       filters.category !== 'all' ||
       filters.costCenter !== 'all' ||
       filters.paymentStatus !== 'all' ||
+      filters.purchaser !== 'all' ||
       advancedFilterCount > 0,
     [filters, advancedFilterCount]
+  );
+
+  const uniquePurchasers = useMemo(() => getUniquePurchasers(expenses), [expenses]);
+
+  const expensesWithoutPurchaserFilter = useMemo(
+    () => filterExpenses(expenses, { ...filters, purchaser: 'all' }, new Date(), rates),
+    [expenses, filters, rates]
+  );
+
+  const purchaserBreakdown = useMemo(
+    () => computePurchaserBreakdown(expensesWithoutPurchaserFilter, rates),
+    [expensesWithoutPurchaserFilter, rates]
   );
 
   const filtered = useMemo(
@@ -172,15 +203,22 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
     setFilters({ ...DEFAULT_EXPENSE_FILTERS });
   };
 
-  const handleExportCsv = () => {
-    const csv = exportExpensesToCsv(filtered, rates);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `hesabyar-expenses-${formatJalaliDate(new Date().toISOString().slice(0, 10)).replace(/\//g, '-')}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleExportExcel = async () => {
+    setIsExportingExcel(true);
+    try {
+      const { downloadExpensesExcel } = await import('../utils/excelExport');
+      const jalaliSlug = formatJalaliDate(new Date().toISOString().slice(0, 10)).replace(/\//g, '-');
+      downloadExpensesExcel(
+        filtered,
+        budgets,
+        rates,
+        displayUnit,
+        `hesabyar-expenses-${jalaliSlug}.xlsx`,
+        activeCategories
+      );
+    } finally {
+      setIsExportingExcel(false);
+    }
   };
 
   const handleConvertSelectedRialToman = async (exp: ExpenseRecord) => {
@@ -257,6 +295,17 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
             دفتر کل هزینه‌ها و فاکتورها
           </h1>
           <p className="mt-1 text-sm text-slate-600 tabular-nums">
+            {filters.purchaser !== 'all' && (
+              <>
+                <span className="font-semibold text-teal-800">
+                  مسئول خرید:{' '}
+                  {filters.purchaser === '__unassigned__'
+                    ? 'بدون مسئول ثبت‌شده'
+                    : filters.purchaser}
+                </span>{' '}
+                ·{' '}
+              </>
+            )}
             {toPersianDigits(filtered.length)} سند یافت شد · مجموع:{' '}
             {formatCompactCurrency(filteredTotalIRT, displayUnit)}
           </p>
@@ -303,12 +352,12 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
 
           <button
             type="button"
-            onClick={handleExportCsv}
-            disabled={filtered.length === 0}
+            onClick={handleExportExcel}
+            disabled={filtered.length === 0 || isExportingExcel}
             className="inline-flex items-center justify-center gap-2 min-h-[42px] px-4 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-40 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Download className="w-4 h-4 text-teal-700" />
-            <span>خروجی اکسل (CSV)</span>
+            <span>{isExportingExcel ? 'در حال ساخت اکسل...' : 'خروجی اکسل (.xlsx)'}</span>
           </button>
         </div>
       </div>
@@ -369,10 +418,25 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
               aria-label="جستجو در هزینه‌ها"
               value={filters.query}
               onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))}
-              placeholder="جستجو بر اساس عنوان، فروشنده، شماره فاکتور یا چک..."
+              placeholder="جستجو بر اساس عنوان، فروشنده، مسئول خرید، فاکتور یا چک..."
               className="w-full min-h-[42px] rounded-xl border border-slate-200 bg-slate-50/60 pr-10 pl-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white"
             />
           </div>
+
+          <select
+            aria-label="فیلتر مسئول خرید"
+            value={filters.purchaser}
+            onChange={(e) => setFilters((f) => ({ ...f, purchaser: e.target.value }))}
+            className="min-h-[42px] rounded-xl border border-slate-200 bg-white px-3 text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-600"
+          >
+            <option value="all">همه مسئولان خرید</option>
+            {uniquePurchasers.map((person) => (
+              <option key={person} value={person}>
+                {person}
+              </option>
+            ))}
+            <option value="__unassigned__">بدون مسئول ثبت‌شده</option>
+          </select>
 
           <select
             aria-label="فیلتر حوزه هزینه"
@@ -383,9 +447,9 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
             className="min-h-[42px] rounded-xl border border-slate-200 bg-white px-3 text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-600"
           >
             <option value="all">همه حوزه‌های هزینه</option>
-            {(Object.keys(CATEGORY_LABELS) as ExpenseCategory[]).map((cat) => (
-              <option key={cat} value={cat}>
-                {CATEGORY_LABELS[cat]}
+            {activeCategories.map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.label}
               </option>
             ))}
           </select>
@@ -424,6 +488,37 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
               </option>
             ))}
           </select>
+        </div>
+
+        {/* Advanced Filters Toggle Strip + Always-Visible Sort */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowAdvancedFilters((v) => !v)}
+              className={`inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
+                showAdvancedFilters || advancedFilterCount > 0
+                  ? 'border-teal-300 bg-teal-50/70 text-teal-800'
+                  : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <Filter className="w-3.5 h-3.5" />
+              <span>
+                فیلترهای پیشرفته
+                {advancedFilterCount > 0 ? ` (${toPersianDigits(advancedFilterCount)})` : ''}
+              </span>
+            </button>
+
+            {hasAnyActiveFilter && (
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="min-h-[34px] px-3 py-1 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 cursor-pointer"
+              >
+                پاک کردن همه فیلترها
+              </button>
+            )}
+          </div>
 
           <div className="relative">
             <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -433,7 +528,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
               onChange={(e) =>
                 setFilters((f) => ({ ...f, sortBy: e.target.value as ExpenseSortBy }))
               }
-              className="w-full min-h-[42px] rounded-xl border border-slate-200 bg-white pr-8 pl-3 text-xs sm:text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-600"
+              className="min-h-[38px] rounded-xl border border-slate-200 bg-white pr-8 pl-3 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-600"
             >
               {(Object.keys(SORT_BY_LABELS) as ExpenseSortBy[]).map((sb) => (
                 <option key={sb} value={sb}>
@@ -442,35 +537,6 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
               ))}
             </select>
           </div>
-        </div>
-
-        {/* Advanced Filters Toggle Strip */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-          <button
-            type="button"
-            onClick={() => setShowAdvancedFilters((v) => !v)}
-            className={`inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
-              showAdvancedFilters || advancedFilterCount > 0
-                ? 'border-teal-300 bg-teal-50/70 text-teal-800'
-                : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            <Filter className="w-3.5 h-3.5" />
-            <span>
-              فیلترهای پیشرفته
-              {advancedFilterCount > 0 ? ` (${toPersianDigits(advancedFilterCount)})` : ''}
-            </span>
-          </button>
-
-          {hasAnyActiveFilter && (
-            <button
-              type="button"
-              onClick={handleResetFilters}
-              className="min-h-[34px] px-3 py-1 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 cursor-pointer"
-            >
-              پاک کردن همه فیلترها
-            </button>
-          )}
         </div>
 
         {showAdvancedFilters && (
@@ -623,6 +689,76 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
         )}
       </div>
 
+      {/* Per-Purchaser Spending Summary Strip */}
+      {purchaserBreakdown.some((p) => !p.isUnassigned) && (
+        <section
+          aria-label="گزارش جمع هزینه هر مسئول خرید"
+          className="rounded-2xl bg-white border border-slate-200 p-4 space-y-3"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <User className="w-4 h-4 text-teal-700 shrink-0" />
+              <h2 className="text-xs sm:text-sm font-bold text-slate-900">
+                مجموع هزینه به تفکیک مسئول خرید
+              </h2>
+              <span className="text-[11px] text-slate-500">
+                (برای فیلتر کردن اسناد روی نام هر فرد کلیک کنید)
+              </span>
+            </div>
+            {filters.purchaser !== 'all' && (
+              <button
+                type="button"
+                onClick={() => setFilters((f) => ({ ...f, purchaser: 'all' }))}
+                className="text-xs font-semibold text-teal-700 hover:text-teal-900 cursor-pointer"
+              >
+                نمایش همه افراد
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+            {purchaserBreakdown.map((person) => {
+              const isSelected = filters.purchaser === person.purchaserKey;
+              return (
+                <button
+                  key={person.purchaserKey}
+                  type="button"
+                  onClick={() =>
+                    setFilters((f) => ({
+                      ...f,
+                      purchaser: isSelected ? 'all' : person.purchaserKey,
+                    }))
+                  }
+                  className={`text-right rounded-xl border p-3 transition-colors cursor-pointer ${
+                    isSelected
+                      ? 'border-teal-600 bg-teal-50/70'
+                      : 'border-slate-200 bg-slate-50/50 hover:bg-slate-50 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-900 truncate">
+                      {person.label}
+                    </span>
+                    <span className="text-[11px] font-medium text-slate-500 tabular-nums shrink-0">
+                      {toPersianDigits(person.count)} سند
+                    </span>
+                  </div>
+                  <div className="mt-1.5 text-sm font-bold text-slate-900 tabular-nums">
+                    {formatCompactCurrency(person.totalIRT, displayUnit)}
+                  </div>
+                  {person.personalOutOfPocketIRT > 0 && (
+                    <div className="mt-1 text-[11px] font-medium text-teal-700 tabular-nums">
+                      از کارت/جیب شخصی:{' '}
+                      {formatCompactCurrency(person.personalOutOfPocketIRT, displayUnit)}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Expense List / Table */}
       <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden">
         {filtered.length === 0 ? (
@@ -691,11 +827,14 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                           </div>
                           <div className="text-xs text-slate-500 truncate mt-0.5">
                             {exp.vendor}
+                            {normalizePurchaserName(exp.purchaser)
+                              ? ` · مسئول: ${normalizePurchaserName(exp.purchaser)}`
+                              : ''}
                             {exp.invoiceNumber ? ` · شماره ${exp.invoiceNumber}` : ''}
                           </div>
                         </td>
                         <td className="py-3.5 px-4 text-xs text-slate-600 whitespace-nowrap">
-                          <div>{CATEGORY_LABELS[exp.category]}</div>
+                          <div>{getCategoryLabel(exp.category, activeCategories)}</div>
                           <div className="text-slate-400 mt-0.5">
                             {COST_CENTER_LABELS[exp.costCenter]}
                           </div>
@@ -764,10 +903,18 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-slate-500">
                         <span>{exp.vendor}</span>
+                        {normalizePurchaserName(exp.purchaser) && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-medium text-slate-700">
+                              {normalizePurchaserName(exp.purchaser)}
+                            </span>
+                          </>
+                        )}
                         <span aria-hidden="true">·</span>
                         <span>{formatJalaliDate(exp.date)}</span>
                         <span aria-hidden="true">·</span>
-                        <span>{CATEGORY_LABELS[exp.category]}</span>
+                        <span>{getCategoryLabel(exp.category, activeCategories)}</span>
                       </div>
                     </div>
                     <div className="text-left shrink-0">
@@ -825,6 +972,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
             </div>
             <JsonSyncPanel
               expenses={expenses}
+              categories={activeCategories}
               budgets={budgets}
               rates={rates}
               onImportJson={onImportJson}
@@ -870,6 +1018,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                   aria-label="بستن جزئیات سند"
                   onClick={() => {
                     setConfirmDeleteId(null);
+                    setConfirmRemovePreview(false);
                     setIsEditingTranches(false);
                     setIsEditingFull(false);
                     onSelectExpense(null);
@@ -884,7 +1033,9 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
             {isEditingFull ? (
               <ExpenseEditForm
                 expense={selectedExpense}
+                categories={activeCategories}
                 rates={rates}
+                purchaserSuggestions={uniquePurchasers}
                 isSaving={isMutating}
                 onCancel={() => setIsEditingFull(false)}
                 onSave={async (patch) => {
@@ -1013,7 +1164,9 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                 <div className="rounded-xl border border-slate-200 p-4 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-xs font-bold text-slate-800">
-                      بخش‌های پرداخت (پیش‌پرداخت / چک / اقساط)
+                      {selectedSummary.hasSchedule || isEditingTranches
+                        ? 'بخش‌های پرداخت (پیش‌پرداخت / چک / اقساط)'
+                        : 'نحوه تسویه سند'}
                     </h3>
                     {!isEditingTranches && (
                       <button
@@ -1029,7 +1182,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                         <span>
                           {selectedSummary.hasSchedule
                             ? 'ویرایش یا افزودن بخش پرداخت'
-                            : 'تقسیم به پرداخت بخشی / چک'}
+                            : 'تغییر به پرداخت بخشی / چک'}
                         </span>
                       </button>
                     )}
@@ -1047,6 +1200,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                         rates={rates}
                         documentExchangeRate={selectedExpense.exchangeRateToToman}
                         baseDate={selectedExpense.date}
+                        paymentStatus={selectedExpense.paymentStatus}
                         tranches={tranchesDraft}
                         onChange={setTranchesDraft}
                       />
@@ -1059,7 +1213,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                           }}
                           className="min-h-[36px] px-3.5 py-1.5 rounded-lg bg-slate-100 text-xs font-semibold text-slate-700 cursor-pointer"
                         >
-                          لغو
+                          انصراف از ویرایش
                         </button>
                         <button
                           type="button"
@@ -1133,7 +1287,9 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                     </div>
                   ) : (
                     <p className="text-xs text-slate-500">
-                      این سند به صورت یکجا ثبت شده است. در صورت پرداخت مرحله‌ای یا چکی می‌توانید آن را به بخش‌های مجزا تقسیم کنید.
+                      {selectedExpense.paymentStatus === 'paid'
+                        ? 'این سند به صورت یکجا و کامل تسویه شده است (بدون پیش‌پرداخت یا چک بعدی).'
+                        : 'این سند به صورت یک‌مرحله‌ای ثبت شده است. در صورت پرداخت در چند مرحله می‌توانید آن را به بخش‌های مجزا تقسیم کنید.'}
                     </p>
                   )}
                 </div>
@@ -1145,19 +1301,41 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                       alt={selectedExpense.title}
                       className="max-h-56 w-full object-contain mx-auto"
                     />
-                    <button
-                      type="button"
-                      disabled={isMutating}
-                      onClick={async () => {
-                        setIsMutating(true);
-                        await onUpdateExpense(selectedExpense.id, { sourcePreviewUrl: undefined });
-                        setIsMutating(false);
-                      }}
-                      className="absolute top-2 left-2 inline-flex items-center gap-1 min-h-[32px] px-2.5 py-1 rounded-lg bg-white/95 border border-red-200 text-[11px] font-semibold text-red-700 hover:bg-red-50 shadow-sm cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>حذف تصویر پیوست</span>
-                    </button>
+                    {confirmRemovePreview ? (
+                      <div className="absolute top-2 left-2 flex items-center gap-1.5 rounded-lg bg-white/95 border border-red-200 p-1.5 shadow-sm">
+                        <button
+                          type="button"
+                          disabled={isMutating}
+                          onClick={async () => {
+                            setIsMutating(true);
+                            await onUpdateExpense(selectedExpense.id, { sourcePreviewUrl: undefined });
+                            setIsMutating(false);
+                            setConfirmRemovePreview(false);
+                          }}
+                          className="min-h-[30px] px-2.5 py-1 rounded-md bg-red-600 text-white text-[11px] font-semibold hover:bg-red-700 cursor-pointer"
+                        >
+                          تایید حذف تصویر
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isMutating}
+                          onClick={() => setConfirmRemovePreview(false)}
+                          className="min-h-[30px] px-2 py-1 rounded-md bg-slate-100 text-[11px] font-semibold text-slate-700 hover:bg-slate-200 cursor-pointer"
+                        >
+                          انصراف
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={isMutating}
+                        onClick={() => setConfirmRemovePreview(true)}
+                        className="absolute top-2 left-2 inline-flex items-center gap-1 min-h-[32px] px-2.5 py-1 rounded-lg bg-white/95 border border-red-200 text-[11px] font-semibold text-red-700 hover:bg-red-50 shadow-sm cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف تصویر پیوست</span>
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -1165,7 +1343,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                   <div className="p-2.5 rounded-xl bg-slate-50">
                     <dt className="text-slate-500">حوزه هزینه</dt>
                     <dd className="mt-1 font-semibold text-slate-900">
-                      {CATEGORY_LABELS[selectedExpense.category]}
+                      {getCategoryLabel(selectedExpense.category, activeCategories)}
                     </dd>
                   </div>
                   <div className="p-2.5 rounded-xl bg-slate-50">
@@ -1213,6 +1391,14 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                       <dt className="text-slate-500">کد پیگیری</dt>
                       <dd className="mt-1 font-mono-num font-semibold text-slate-900">
                         {selectedExpense.trackingCode}
+                      </dd>
+                    </div>
+                  )}
+                  {normalizePurchaserName(selectedExpense.purchaser) && (
+                    <div className="p-2.5 rounded-xl bg-teal-50/70 border border-teal-200/70">
+                      <dt className="text-teal-800">مسئول خرید / پرداخت‌کننده</dt>
+                      <dd className="mt-1 font-bold text-teal-950">
+                        {normalizePurchaserName(selectedExpense.purchaser)}
                       </dd>
                     </div>
                   )}
@@ -1264,8 +1450,12 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                     <CheckCircle2 className="w-4 h-4" />
                     <span>
                       {selectedExpense.paymentStatus === 'paid'
-                        ? 'تغییر کل سند به در انتظار پرداخت'
-                        : 'تسویه کامل کل سند'}
+                        ? selectedSummary.hasSchedule
+                          ? 'بازگرداندن همه بخش‌ها به در انتظار'
+                          : 'تغییر کل سند به در انتظار پرداخت'
+                        : selectedSummary.hasSchedule
+                          ? 'تسویه کامل همه بخش‌های سند'
+                          : 'تسویه کامل کل سند'}
                     </span>
                   </button>
 

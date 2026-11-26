@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Camera,
   CheckCircle2,
@@ -12,6 +12,7 @@ import type {
   AiProviderId,
   AiProviderStatus,
   CategoryBudget,
+  CategoryDefinition,
   DisplayUnit,
   ExchangeRates,
   ExpenseCategory,
@@ -31,9 +32,16 @@ import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { toPersianDigits } from './utils/jalali';
 import {
+  CATEGORY_PALETTE_COLORS,
   clearLedgerExpenses,
+  createCustomCategoryId,
+  DEFAULT_CATEGORIES,
+  deleteCategoryAndReassign,
   mergeLedgerData,
+  normalizeCategoryDescription,
+  normalizeCategoryLabel,
   parseAndValidateLedgerImport,
+  resolveCategories,
 } from './utils/finance';
 import {
   loadLocalApiKeys,
@@ -59,6 +67,7 @@ export default function App() {
   const [ledger, setLedger] = useState<LedgerData>({
     expenses: [],
     budgets: [],
+    categories: DEFAULT_CATEGORIES,
     rates: { USD: 70000, EUR: 76000 },
     aiConfig: { provider: 'gemini', model: 'gemini-4-hydrogen' },
   });
@@ -72,6 +81,7 @@ export default function App() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const [ledgerCategoryFilter, setLedgerCategoryFilter] = useState<ExpenseCategory | 'all'>('all');
+  const [ledgerPurchaserFilter, setLedgerPurchaserFilter] = useState<string>('all');
   const [selectedExpense, setSelectedExpense] = useState<ExpenseRecord | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [localApiKeys, setLocalApiKeys] = useState<Partial<Record<AiProviderId, string>>>({});
@@ -186,6 +196,7 @@ export default function App() {
       setPendingDrafts(null);
       setPreviewPages([]);
       setLedgerCategoryFilter('all');
+      setLedgerPurchaserFilter('all');
       setActiveTab('ledger');
       showToast(`${toPersianDigits(created.length)} سند هزینه با موفقیت تایید و ثبت شد.`);
     } catch (err) {
@@ -287,21 +298,24 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ budgets, rates, aiConfig }),
       });
-      if (res.ok) {
-        const updated = (await res.json()) as LedgerData & { aiStatus?: AiProviderStatus };
-        const nextLedger: LedgerData = {
-          expenses: updated.expenses,
-          budgets: updated.budgets,
-          rates: updated.rates,
-          aiConfig: updated.aiConfig,
-        };
-        setLedger(nextLedger);
-        saveCache(nextLedger);
-        if (updated.aiStatus) {
-          setAiStatus(updated.aiStatus);
-        }
-        showToast('تنظیمات هوش مصنوعی، بودجه‌ها و نرخ ارز ذخیره شدند.');
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'خطا در ذخیره تنظیمات');
       }
+      const updated = data as LedgerData & { aiStatus?: AiProviderStatus };
+      const nextLedger: LedgerData = {
+        expenses: updated.expenses,
+        budgets: updated.budgets,
+        categories: resolveCategories(updated.categories),
+        rates: updated.rates,
+        aiConfig: updated.aiConfig,
+      };
+      setLedger(nextLedger);
+      saveCache(nextLedger);
+      if (updated.aiStatus) {
+        setAiStatus(updated.aiStatus);
+      }
+      showToast('تنظیمات هوش مصنوعی، بودجه‌ها و نرخ ارز ذخیره شدند.');
     } catch (err) {
       if (err instanceof TypeError) {
         setLedger((prev) => {
@@ -310,6 +324,8 @@ export default function App() {
           return next;
         });
         showToast('تنظیمات به صورت محلی ذخیره شدند.');
+      } else {
+        throw err;
       }
     }
   };
@@ -400,6 +416,182 @@ export default function App() {
     }
   };
 
+  const activeCategories = useMemo(
+    () => resolveCategories(ledger.categories),
+    [ledger.categories]
+  );
+
+  const handleAddCategory = async (input: {
+    label: string;
+    color: string;
+    description?: string;
+    monthlyLimitIRT: number;
+  }) => {
+    try {
+      const res = await fetch('/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || 'خطا در ایجاد دسته‌بندی');
+      }
+      const nextLedger = payload.ledger as LedgerData;
+      const created = payload.category as CategoryDefinition;
+      setLedger(nextLedger);
+      saveCache(nextLedger);
+      showToast(`دسته‌بندی «${created.label}» اضافه شد.`);
+    } catch (err) {
+      if (err instanceof TypeError) {
+        const label = normalizeCategoryLabel(input.label);
+        if (!label) throw new Error('نام دسته‌بندی نمی‌تواند خالی باشد.');
+        if (activeCategories.some((c) => c.label.toLowerCase() === label.toLowerCase())) {
+          throw new Error('دسته‌بندی با این نام از قبل وجود دارد.');
+        }
+        const id = createCustomCategoryId(activeCategories.map((c) => c.id));
+        const desc = normalizeCategoryDescription(input.description);
+        const created: CategoryDefinition = {
+          id,
+          label,
+          color:
+            /^#[0-9A-Fa-f]{6}$/.test(input.color.trim())
+              ? input.color.trim()
+              : CATEGORY_PALETTE_COLORS[activeCategories.length % CATEGORY_PALETTE_COLORS.length].hex,
+          ...(desc ? { description: desc } : {}),
+        };
+        const limit = Number.isFinite(Number(input.monthlyLimitIRT))
+          ? Math.max(0, Math.round(Number(input.monthlyLimitIRT)))
+          : 0;
+        const nextLedger: LedgerData = {
+          ...ledger,
+          categories: [...activeCategories, created],
+          budgets: [
+            ...ledger.budgets.filter((b) => b.category !== id),
+            { category: id, monthlyLimitIRT: limit },
+          ],
+        };
+        setLedger(nextLedger);
+        saveCache(nextLedger);
+        showToast(`دسته‌بندی «${created.label}» به صورت محلی اضافه شد.`);
+        return;
+      }
+      throw err;
+    }
+  };
+
+  const handleUpdateCategory = async (
+    id: string,
+    patch: { label: string; color: string; description?: string }
+  ) => {
+    try {
+      const res = await fetch(`/api/categories/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || 'خطا در ویرایش دسته‌بندی');
+      }
+      const nextLedger = payload.ledger as LedgerData;
+      const updated = payload.category as CategoryDefinition;
+      setLedger(nextLedger);
+      saveCache(nextLedger);
+      showToast(`دسته‌بندی «${updated.label}» بروزرسانی شد.`);
+    } catch (err) {
+      if (err instanceof TypeError) {
+        const label = normalizeCategoryLabel(patch.label);
+        if (!label) throw new Error('نام دسته‌بندی نمی‌تواند خالی باشد.');
+        if (
+          activeCategories.some(
+            (c) => c.id !== id && c.label.toLowerCase() === label.toLowerCase()
+          )
+        ) {
+          throw new Error('دسته‌بندی دیگری با این نام از قبل وجود دارد.');
+        }
+        const desc = normalizeCategoryDescription(patch.description);
+        const nextCategories = activeCategories.map((c) => {
+          if (c.id !== id) return c;
+          const nextCat: CategoryDefinition = {
+            ...c,
+            label,
+            color: /^#[0-9A-Fa-f]{6}$/.test(patch.color.trim()) ? patch.color.trim() : c.color,
+            ...(desc ? { description: desc } : {}),
+          };
+          if (!desc) delete nextCat.description;
+          return nextCat;
+        });
+        const nextLedger: LedgerData = { ...ledger, categories: nextCategories };
+        setLedger(nextLedger);
+        saveCache(nextLedger);
+        showToast(`دسته‌بندی «${label}» به صورت محلی بروزرسانی شد.`);
+        return;
+      }
+      throw err;
+    }
+  };
+
+  const handleDeleteCategory = async (id: string, reassignToId?: string) => {
+    try {
+      const res = await fetch(`/api/categories/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reassignTo: reassignToId }),
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || 'خطا در حذف دسته‌بندی');
+      }
+      const nextLedger = payload.ledger as LedgerData;
+      const reassignedCount = Number(payload.reassignedCount) || 0;
+      setLedger(nextLedger);
+      saveCache(nextLedger);
+      if (ledgerCategoryFilter === id) {
+        setLedgerCategoryFilter('all');
+      }
+      setSelectedExpense((prev) =>
+        prev ? (nextLedger.expenses.find((e) => e.id === prev.id) ?? null) : null
+      );
+      showToast(
+        reassignedCount > 0
+          ? `دسته‌بندی حذف شد و ${toPersianDigits(reassignedCount)} سند به دسته‌بندی مقصد منتقل گردید.`
+          : 'دسته‌بندی با موفقیت حذف شد.'
+      );
+    } catch (err) {
+      if (err instanceof TypeError) {
+        const res = deleteCategoryAndReassign({
+          categories: activeCategories,
+          budgets: ledger.budgets,
+          expenses: ledger.expenses,
+          targetId: id,
+          reassignToId,
+        });
+        const nextLedger: LedgerData = {
+          ...ledger,
+          categories: res.categories,
+          budgets: res.budgets,
+          expenses: res.expenses,
+        };
+        setLedger(nextLedger);
+        saveCache(nextLedger);
+        if (ledgerCategoryFilter === id) {
+          setLedgerCategoryFilter('all');
+        }
+        setSelectedExpense((prev) =>
+          prev ? (nextLedger.expenses.find((e) => e.id === prev.id) ?? null) : null
+        );
+        showToast(
+          res.reassignedCount > 0
+            ? `دسته‌بندی به صورت محلی حذف و ${toPersianDigits(res.reassignedCount)} سند منتقل شد.`
+            : 'دسته‌بندی به صورت محلی حذف شد.'
+        );
+        return;
+      }
+      throw err;
+    }
+  };
+
   const navigateTab = (tab: ActiveTab) => {
     if (tab !== 'capture') {
       setPendingDrafts(null);
@@ -451,6 +643,7 @@ export default function App() {
             type="button"
             onClick={() => {
               setLedgerCategoryFilter('all');
+              setLedgerPurchaserFilter('all');
               navigateTab('ledger');
             }}
             className={`py-5 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
@@ -532,12 +725,19 @@ export default function App() {
               <OverviewDashboard
                 expenses={ledger.expenses}
                 budgets={ledger.budgets}
+                categories={activeCategories}
                 rates={ledger.rates}
                 displayUnit={displayUnit}
                 onChangeDisplayUnit={handleChangeDisplayUnit}
                 onNavigateCapture={() => navigateTab('capture')}
                 onOpenLedgerWithCategory={(cat) => {
                   setLedgerCategoryFilter(cat);
+                  setLedgerPurchaserFilter('all');
+                  navigateTab('ledger');
+                }}
+                onOpenLedgerWithPurchaser={(person) => {
+                  setLedgerCategoryFilter('all');
+                  setLedgerPurchaserFilter(person);
                   navigateTab('ledger');
                 }}
                 onSelectExpense={(exp) => {
@@ -549,12 +749,16 @@ export default function App() {
 
             {activeTab === 'capture' && !pendingDrafts && (
               <CaptureWorkspace
+                categories={activeCategories}
                 rates={ledger.rates}
                 aiConfig={ledger.aiConfig ?? { provider: 'gemini', model: 'gemini-4-hydrogen' }}
                 aiStatus={aiStatus}
                 localApiKeys={localApiKeys}
                 onSaveLocalApiKey={handleSaveLocalApiKey}
                 onRemoveLocalApiKey={handleRemoveLocalApiKey}
+                onSaveAiConfig={(nextAiConfig) =>
+                  handleSaveSettings(ledger.budgets, ledger.rates, nextAiConfig)
+                }
                 onOpenSettings={() => navigateTab('settings')}
                 onDraftsReady={(drafts, pages) => {
                   setPendingDrafts(drafts);
@@ -569,6 +773,7 @@ export default function App() {
                 drafts={pendingDrafts}
                 previewPages={previewPages}
                 existingExpenses={ledger.expenses}
+                categories={activeCategories}
                 rates={ledger.rates}
                 isSaving={isSavingBatch}
                 saveError={saveError}
@@ -594,10 +799,12 @@ export default function App() {
               <ExpenseLedger
                 expenses={ledger.expenses}
                 budgets={ledger.budgets}
+                categories={activeCategories}
                 rates={ledger.rates}
                 displayUnit={displayUnit}
                 onChangeDisplayUnit={handleChangeDisplayUnit}
                 initialCategory={ledgerCategoryFilter}
+                initialPurchaser={ledgerPurchaserFilter}
                 selectedExpense={selectedExpense}
                 onSelectExpense={setSelectedExpense}
                 onTogglePaid={handleTogglePaid}
@@ -610,6 +817,7 @@ export default function App() {
 
             {activeTab === 'settings' && (
               <SettingsBudgets
+                categories={activeCategories}
                 budgets={ledger.budgets}
                 rates={ledger.rates}
                 expenses={ledger.expenses}
@@ -619,6 +827,9 @@ export default function App() {
                 onSaveLocalApiKey={handleSaveLocalApiKey}
                 onRemoveLocalApiKey={handleRemoveLocalApiKey}
                 onClearLedger={handleClearLedger}
+                onAddCategory={handleAddCategory}
+                onUpdateCategory={handleUpdateCategory}
+                onDeleteCategory={handleDeleteCategory}
                 onSaveSettings={handleSaveSettings}
                 onImportJson={handleImportJson}
               />
@@ -658,6 +869,7 @@ export default function App() {
           type="button"
           onClick={() => {
             setLedgerCategoryFilter('all');
+            setLedgerPurchaserFilter('all');
             navigateTab('ledger');
           }}
           className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium cursor-pointer ${

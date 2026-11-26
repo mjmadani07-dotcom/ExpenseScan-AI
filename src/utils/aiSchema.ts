@@ -1,4 +1,5 @@
 import type {
+  CategoryDefinition,
   CostCenter,
   Currency,
   DocumentType,
@@ -8,6 +9,11 @@ import type {
   PaymentStatus,
   PaymentTrancheStatus,
 } from '../types/expense.ts';
+import {
+  DEFAULT_CATEGORIES,
+  derivePaymentStatusFromTranches,
+  resolveCategories,
+} from './finance.ts';
 
 export const VALID_CURRENCIES: Currency[] = ['IRT', 'IRR', 'USD', 'EUR'];
 export const VALID_DOC_TYPES: DocumentType[] = [
@@ -40,6 +46,7 @@ export const VALID_COST_CENTERS: CostCenter[] = [
 ];
 export const VALID_PAYMENT_METHODS: PaymentMethod[] = [
   'corporate_card',
+  'personal_card',
   'bank_transfer',
   'petty_cash',
   'online_gateway',
@@ -66,8 +73,18 @@ export function stripJsonCodeFences(raw: string): string {
 
 export function buildExtractionSystemInstruction(
   todayIso: string,
-  includeJsonContract = false
+  includeJsonContract = false,
+  categories?: CategoryDefinition[]
 ): string {
+  const activeCategories = resolveCategories(categories);
+  const categoryPromptLines = activeCategories
+    .map(
+      (cat) =>
+        `   - ${cat.id}: ${cat.label}${cat.description ? ` (${cat.description})` : ''}`
+    )
+    .join('\n');
+  const categoryUnion = activeCategories.map((c) => c.id).join(' | ');
+
   const base = `شما یک حسابدار ارشد و متخصص استخراج اطلاعات اسناد مالی شرکتی (فاکتورهای رسمی و غیررسمی، پیش‌فاکتور، رسید کارتخوان، فیش و پیامک‌های بانکی، قبوض، تنخواه و گزارش‌های متنی خرید) هستید.
 وظیفه شما استخراج دقیق و ساختاریافته هزینه‌ها از تصاویر (از جمله صفحات PDF تبدیل‌شده به تصویر) یا متن‌های ورودی است.
 
@@ -79,18 +96,15 @@ export function buildExtractionSystemInstruction(
    - در رسیدهای روزمره، فاکتورهای فروشگاه‌ها و یادداشت‌ها معمولاً «تومان» (IRT) است.
    - برای سرویس‌های خارجی دلار (USD) یا یورو (EUR) استفاده کنید.
    - هرگز مبلغ ریال را خودسرانه به تومان تقسیم نکنید؛ مبلغ دقیق مندرج را با currency='IRR' یا 'IRT' ثبت کنید و در extractionNotes توضیح دهید.
-4. دسته‌بندی حوزه هزینه (category):
-   - infrastructure: سرور، دامنه، اینترنت، نرم‌افزار، کلود، API
-   - operations: حمل‌ونقل، پیک، بسته‌بندی، انبار، نگهداری
-   - marketing: تبلیغات، رویداد، طراحی، تولید محتوا، سئو
-   - hr_admin: حقوق، پذیرایی، ملزومات اداری، اجاره، قبوض آب و برق
-   - equipment: لپ‌تاپ، مانیتور، سخت‌افزار، مبلمان اداری
-   - tax_legal: مالیات، بیمه تامین اجتماعی، عوارض، مشاوره حقوقی/مالیاتی
-   - travel: بلیط، هتل، ایاب‌وذهاب ماموریت
-   - other: سایر موارد
-5. پرداخت بخشی، پیش‌پرداخت و چک (paymentTranches):
-   - اگر در فاکتور یا متن اشاره شده باشد که خرید به صورت مرحله‌ای یا ترکیبی است (مثلاً پیش‌پرداخت نقدی/کارت/حواله و مابقی به صورت چک یا قسط، یا چند فقره چک با سررسیدهای متفاوت)، حتماً paymentStatus را 'partial' (اگر بخشی پرداخت شده و بخشی مانده) یا 'pending' بگذارید و تمام بخش‌های پرداخت را در آرایه paymentTranches استخراج کنید.
-6. فیلدهای title و vendor را به فارسی روان و شفاف بنویسید (نام برند خارجی را می‌توان انگلیسی یا فارسی نوشت).`;
+4. دسته‌بندی حوزه هزینه (category) — فقط یکی از شناسه‌های زیر را انتخاب کنید:
+${categoryPromptLines}
+5. تشخیص پرداخت یکجا در مقابل پیش‌پرداخت و چک (بسیار مهم):
+   - ابتدا بررسی کنید آیا سند به صورت یکجا و کامل پرداخت شده یا واقعاً دارای پیش‌پرداخت / چک / اقساط چندمرحله‌ای است.
+   - اگر کل مبلغ فاکتور یا رسید در یک نوبت کامل پرداخت شده است (مثل رسید کارتخوان، فیش واریز یکجا، فاکتور نقدی یا کارتی تسویه‌شده بدون قسط یا چک بعدی)، حتماً paymentStatus را 'paid' و آرایه paymentTranches را دقیقاً خالی [] بگذارید (به هیچ وجه برای پرداخت کامل و یکجا آیتم پیش‌پرداخت یا چک نسازید).
+   - اگر سند فقط یک پرداخت معوق یا یک چک واحد بابت کل مبلغ است (بدون پیش‌پرداخت یا بخش‌بندی)، باز هم paymentTranches را خالی [] بگذارید و فقط paymentMethod (مثلاً 'check') و paymentStatus ('pending' یا 'overdue') را تنظیم کنید.
+   - تنها زمانی paymentTranches را پر کنید که در فاکتور یا متن واقعاً به پرداخت مرحله‌ای اشاره شده باشد (مثلاً پیش‌پرداخت نقدی/حواله + مابقی به صورت چک یا قسط، یا چند فقره چک با سررسیدهای متفاوت، یا پرداخت جزئی با مانده بدهی). در این حالت در صورت پرداخت بخشی و باقی ماندن مابقی، paymentStatus را 'partial' بگذارید.
+6. اگر در سند، فیش یا متن اشاره شده که خرید توسط فرد مشخصی انجام شده یا با کارت/حساب شخصی فردی پرداخت شده است، نام آن فرد را در purchaser بنویسید و در صورت پرداخت با کارت یا جیب شخصی فرد، paymentMethod را 'personal_card' بگذارید؛ در غیر این صورت purchaser را null بگذارید.
+7. فیلدهای title و vendor را به فارسی روان و شفاف بنویسید (نام برند خارجی را می‌توان انگلیسی یا فارسی نوشت).`;
 
   if (!includeJsonContract) return base;
 
@@ -103,8 +117,9 @@ export function buildExtractionSystemInstruction(
       "title": "string",
       "vendor": "string",
       "vendorTaxId": "string | null",
+      "purchaser": "string | null",
       "documentType": "invoice | receipt | bank_transfer | bill | proforma | payroll | petty_cash | other",
-      "category": "infrastructure | operations | marketing | hr_admin | equipment | tax_legal | travel | other",
+      "category": "${categoryUnion}",
       "costCenter": "engineering | sales | operations | finance | executive | general",
       "amount": 0,
       "currency": "IRT | IRR | USD | EUR",
@@ -114,19 +129,9 @@ export function buildExtractionSystemInstruction(
       "date": "YYYY-MM-DD",
       "invoiceNumber": "string | null",
       "trackingCode": "string | null",
-      "paymentMethod": "corporate_card | bank_transfer | petty_cash | online_gateway | cash | check",
+      "paymentMethod": "corporate_card | personal_card | bank_transfer | petty_cash | online_gateway | cash | check",
       "paymentStatus": "paid | partial | pending | overdue",
-      "paymentTranches": [
-        {
-          "title": "string",
-          "amount": 0,
-          "method": "corporate_card | bank_transfer | petty_cash | online_gateway | cash | check",
-          "status": "paid | pending | overdue",
-          "date": "YYYY-MM-DD",
-          "referenceCode": "string",
-          "notes": "string"
-        }
-      ],
+      "paymentTranches": [],
       "dueDate": "YYYY-MM-DD | null",
       "projectTag": "string | null",
       "notes": "string | null",
@@ -136,13 +141,20 @@ export function buildExtractionSystemInstruction(
       ]
     }
   ]
-}`;
+}
+تبصره paymentTranches: برای پرداخت‌های یکجا حتماً [] باشد. تنها در صورت وجود پیش‌پرداخت یا چک‌های چندمرحله‌ای، هر آیتم را با کلیدهای { "title", "amount", "method", "status": "paid | pending | overdue", "date": "YYYY-MM-DD", "referenceCode", "notes" } قرار دهید.`;
 }
 
 export function normalizeExtractedExpenseList(
   list: Array<Record<string, unknown>>,
-  todayIso: string
+  todayIso: string,
+  categories?: CategoryDefinition[]
 ): Omit<ExpenseFields, 'sourceType' | 'sourceFileName' | 'sourcePreviewUrl' | 'pageCount'>[] {
+  const activeCategories = categories && categories.length > 0 ? resolveCategories(categories) : DEFAULT_CATEGORIES;
+  const allowedCategoryIds = activeCategories.map((c) => c.id);
+  const fallbackCategory = allowedCategoryIds.includes('other')
+    ? 'other'
+    : allowedCategoryIds[0] ?? 'other';
   return list.map((item) => {
     const rawItems = Array.isArray(item.lineItems) ? item.lineItems : [];
     const lineItems = rawItems
@@ -159,8 +171,11 @@ export function normalizeExtractedExpenseList(
         ? item.date
         : todayIso;
 
+    const amount = Number.isFinite(Number(item.amount)) ? Math.max(0, Number(item.amount)) : 0;
+    const rawStatus = clampAiEnum(item.paymentStatus, VALID_STATUSES, 'paid');
+
     const rawTranches = Array.isArray(item.paymentTranches) ? item.paymentTranches : [];
-    const paymentTranches = rawTranches
+    let paymentTranches = rawTranches
       .filter((tr): tr is Record<string, unknown> => Boolean(tr && typeof tr === 'object'))
       .map((tr, idx) => ({
         id: `tr-${Date.now()}-${idx}`,
@@ -174,16 +189,34 @@ export function normalizeExtractedExpenseList(
             : undefined,
         referenceCode: tr.referenceCode ? String(tr.referenceCode) : undefined,
         notes: tr.notes ? String(tr.notes) : undefined,
-      }));
+      }))
+      .filter((tr) => tr.amount > 0);
+
+    // Strip redundant single-tranche wrapper when the document was paid in full (or settled in one payment for 100% of amount)
+    if (
+      paymentTranches.length === 1 &&
+      amount > 0 &&
+      Math.abs(paymentTranches[0].amount - amount) <= 1 &&
+      (rawStatus === 'paid' || rawStatus !== 'partial')
+    ) {
+      paymentTranches = [];
+    }
+
+    const finalTranches = paymentTranches.length > 0 ? paymentTranches : undefined;
+    const paymentStatus = finalTranches
+      ? derivePaymentStatusFromTranches(amount, finalTranches, rawStatus)
+      : rawStatus === 'partial'
+        ? 'pending'
+        : rawStatus;
 
     return {
       title: String(item.title || 'هزینه بدون عنوان'),
       vendor: String(item.vendor || 'نامشخص'),
       vendorTaxId: item.vendorTaxId ? String(item.vendorTaxId) : undefined,
       documentType: clampAiEnum(item.documentType, VALID_DOC_TYPES, 'invoice'),
-      category: clampAiEnum(item.category, VALID_CATEGORIES, 'other'),
+      category: clampAiEnum(item.category, allowedCategoryIds, fallbackCategory),
       costCenter: clampAiEnum(item.costCenter, VALID_COST_CENTERS, 'general'),
-      amount: Number.isFinite(Number(item.amount)) ? Math.max(0, Number(item.amount)) : 0,
+      amount,
       currency: clampAiEnum(item.currency, VALID_CURRENCIES, 'IRT'),
       exchangeRateToToman:
         Number.isFinite(Number(item.exchangeRateToToman)) && Number(item.exchangeRateToToman) > 0
@@ -197,11 +230,15 @@ export function normalizeExtractedExpenseList(
       invoiceNumber: item.invoiceNumber ? String(item.invoiceNumber) : undefined,
       trackingCode: item.trackingCode ? String(item.trackingCode) : undefined,
       paymentMethod: clampAiEnum(item.paymentMethod, VALID_PAYMENT_METHODS, 'corporate_card'),
-      paymentStatus: clampAiEnum(item.paymentStatus, VALID_STATUSES, 'paid'),
-      paymentTranches: paymentTranches.length > 0 ? paymentTranches : undefined,
+      paymentStatus,
+      paymentTranches: finalTranches,
       dueDate:
         typeof item.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.dueDate)
           ? item.dueDate
+          : undefined,
+      purchaser:
+        typeof item.purchaser === 'string' && item.purchaser.trim()
+          ? item.purchaser.trim().replace(/\s+/g, ' ').slice(0, 80)
           : undefined,
       projectTag: item.projectTag ? String(item.projectTag) : undefined,
       notes: item.notes ? String(item.notes) : undefined,

@@ -4,6 +4,7 @@ import type {
   AiConfig,
   AiProviderId,
   CategoryBudget,
+  CategoryDefinition,
   ExchangeRates,
   ExpenseFields,
   ExpenseRecord,
@@ -12,10 +13,20 @@ import type {
   LedgerData,
 } from '../src/types/expense.ts';
 import {
+  CATEGORY_PALETTE_COLORS,
+  DEFAULT_CATEGORIES,
   clearLedgerExpenses,
+  createCustomCategoryId,
+  deleteCategoryAndReassign,
   mergeLedgerData,
+  normalizeCategoryDescription,
+  normalizeCategoryLabel,
+  normalizePurchaserName,
   parseAndValidateLedgerImport,
+  resolveCategories,
+  sanitizeCategories,
 } from '../src/utils/finance.ts';
+import { validateClientBaseUrl } from '../src/utils/aiUrls.ts';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const LEDGER_FILE = path.join(DATA_DIR, 'ledger.json');
@@ -32,7 +43,7 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
 
 const VALID_PROVIDERS: readonly AiProviderId[] = ['gemini', 'openai', 'openrouter'];
 
-function sanitizeAiConfig(input?: Partial<AiConfig>): AiConfig {
+function sanitizeAiConfig(input?: Partial<AiConfig>, lenient = false): AiConfig {
   const provider: AiProviderId =
     input?.provider && VALID_PROVIDERS.includes(input.provider)
       ? input.provider
@@ -47,7 +58,41 @@ function sanitizeAiConfig(input?: Partial<AiConfig>): AiConfig {
     typeof input?.model === 'string' && input.model.trim()
       ? input.model.trim().slice(0, 120)
       : fallbackModel;
-  return { provider, model };
+
+  const baseUrls: Partial<Record<AiProviderId, string>> = {};
+  if (input?.baseUrls && typeof input.baseUrls === 'object') {
+    for (const p of VALID_PROVIDERS) {
+      const rawUrl = input.baseUrls[p];
+      if (typeof rawUrl === 'string' && rawUrl.trim()) {
+        try {
+          const clean = validateClientBaseUrl(rawUrl.slice(0, 300));
+          if (clean) baseUrls[p] = clean;
+        } catch (err) {
+          if (!lenient) throw err;
+        }
+      }
+    }
+  }
+
+  let activeBaseUrl = baseUrls[provider];
+  if (!activeBaseUrl && typeof input?.baseUrl === 'string' && input.baseUrl.trim()) {
+    try {
+      const clean = validateClientBaseUrl(input.baseUrl.slice(0, 300));
+      if (clean) {
+        activeBaseUrl = clean;
+        baseUrls[provider] = clean;
+      }
+    } catch (err) {
+      if (!lenient) throw err;
+    }
+  }
+
+  return {
+    provider,
+    model,
+    ...(activeBaseUrl ? { baseUrl: activeBaseUrl } : {}),
+    ...(Object.keys(baseUrls).length > 0 ? { baseUrls } : {}),
+  };
 }
 
 const DEFAULT_BUDGETS: CategoryBudget[] = [
@@ -154,6 +199,7 @@ const SEED_EXPENSES: ExpenseRecord[] = [
     trackingCode: '55109382',
     paymentMethod: 'corporate_card',
     paymentStatus: 'paid',
+    purchaser: 'علی رضایی',
     projectTag: 'تجهیز ایستگاه کار',
     lineItems: [
       { description: 'مانیتور ۲۷ اینچ صنعتی', quantity: 2, unitPrice: 16143000, totalPrice: 32286000 },
@@ -177,8 +223,9 @@ const SEED_EXPENSES: ExpenseRecord[] = [
     discountAmount: 0,
     date: '2026-11-03',
     invoiceNumber: 'CF-2026-1103',
-    paymentMethod: 'corporate_card',
+    paymentMethod: 'personal_card',
     paymentStatus: 'paid',
+    purchaser: 'علی رضایی',
     projectTag: 'پلتفرم اصلی',
     lineItems: [
       { description: 'Pro Plan + Workers Paid', quantity: 1, unitPrice: 145, totalPrice: 145 },
@@ -203,6 +250,7 @@ const SEED_EXPENSES: ExpenseRecord[] = [
     trackingCode: '31094822',
     paymentMethod: 'bank_transfer',
     paymentStatus: 'paid',
+    purchaser: 'امیرحسین احمدی',
     lineItems: [
       { description: 'حمل‌ونقل درون‌شهری قرارداد سازمانی', quantity: 1, unitPrice: 16744000, totalPrice: 16744000 },
     ],
@@ -249,6 +297,7 @@ const SEED_EXPENSES: ExpenseRecord[] = [
     date: '2026-10-09',
     paymentMethod: 'petty_cash',
     paymentStatus: 'paid',
+    purchaser: 'سارا کریمی',
     lineItems: [
       { description: 'کاغذ A4، تونر و ملزومات اداری', quantity: 1, unitPrice: 4350000, totalPrice: 4350000 },
       { description: 'پذیرایی جلسات مشتریان', quantity: 1, unitPrice: 2400000, totalPrice: 2400000 },
@@ -272,8 +321,9 @@ const SEED_EXPENSES: ExpenseRecord[] = [
     date: '2026-09-27',
     invoiceNumber: 'ALB-33091',
     trackingCode: '77410293',
-    paymentMethod: 'corporate_card',
+    paymentMethod: 'personal_card',
     paymentStatus: 'paid',
+    purchaser: 'سارا کریمی',
     projectTag: 'نمایشگاه صنعت',
     lineItems: [
       { description: 'بلیط رفت و برگشت تیم فروش (۲ نفر)', quantity: 2, unitPrice: 4100000, totalPrice: 8200000 },
@@ -359,6 +409,7 @@ function ensureLedgerFile(): void {
   if (!fs.existsSync(LEDGER_FILE)) {
     const initial: LedgerData = {
       expenses: SEED_EXPENSES,
+      categories: DEFAULT_CATEGORIES,
       budgets: DEFAULT_BUDGETS,
       rates: DEFAULT_RATES,
       aiConfig: DEFAULT_AI_CONFIG,
@@ -385,13 +436,15 @@ export function readLedger(): LedgerData {
     });
     return {
       expenses,
+      categories: resolveCategories(parsed.categories),
       budgets: Array.isArray(parsed.budgets) ? parsed.budgets : DEFAULT_BUDGETS,
       rates,
-      aiConfig: sanitizeAiConfig(parsed.aiConfig),
+      aiConfig: sanitizeAiConfig(parsed.aiConfig, true),
     };
   } catch {
     return {
       expenses: SEED_EXPENSES,
+      categories: DEFAULT_CATEGORIES,
       budgets: DEFAULT_BUDGETS,
       rates: DEFAULT_RATES,
       aiConfig: DEFAULT_AI_CONFIG,
@@ -411,6 +464,7 @@ export function addExpensesBatch(items: ExpenseFields[]): ExpenseRecord[] {
   const now = new Date().toISOString();
   const created: ExpenseRecord[] = items.map((item, idx) => ({
     ...item,
+    purchaser: normalizePurchaserName(item.purchaser),
     id: `exp-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
     createdAt: now,
     approvedAt: now,
@@ -427,6 +481,7 @@ export function updateExpense(id: string, patch: Partial<ExpenseFields>): Expens
   const updated: ExpenseRecord = {
     ...ledger.expenses[index],
     ...patch,
+    ...('purchaser' in patch ? { purchaser: normalizePurchaserName(patch.purchaser) } : {}),
     id: ledger.expenses[index].id,
     createdAt: ledger.expenses[index].createdAt,
     approvedAt: ledger.expenses[index].approvedAt,
@@ -446,16 +501,140 @@ export function deleteExpense(id: string): boolean {
 }
 
 export function updateSettings(params: {
+  categories?: CategoryDefinition[];
   budgets?: CategoryBudget[];
   rates?: ExchangeRates;
   aiConfig?: Partial<AiConfig>;
 }): LedgerData {
   const ledger = readLedger();
+  if (Array.isArray(params.categories)) {
+    ledger.categories = sanitizeCategories(params.categories);
+  }
   if (Array.isArray(params.budgets)) ledger.budgets = params.budgets;
   if (params.rates) ledger.rates = params.rates;
   if (params.aiConfig) ledger.aiConfig = sanitizeAiConfig(params.aiConfig);
   writeLedger(ledger);
   return ledger;
+}
+
+export function addCategoryOnServer(input: {
+  label: string;
+  color?: string;
+  description?: string;
+  monthlyLimitIRT?: number;
+}): { ledger: LedgerData; category: CategoryDefinition } {
+  const ledger = readLedger();
+  const categories = resolveCategories(ledger.categories);
+  const label = normalizeCategoryLabel(input.label);
+  if (!label) {
+    throw new Error('نام دسته‌بندی نمی‌تواند خالی باشد.');
+  }
+  if (categories.some((c) => c.label.toLowerCase() === label.toLowerCase())) {
+    throw new Error('دسته‌بندی با این نام از قبل وجود دارد.');
+  }
+  const color =
+    typeof input.color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(input.color.trim())
+      ? input.color.trim()
+      : CATEGORY_PALETTE_COLORS[categories.length % CATEGORY_PALETTE_COLORS.length].hex;
+  const description = normalizeCategoryDescription(input.description);
+  const id = createCustomCategoryId(categories.map((c) => c.id));
+  const category: CategoryDefinition = {
+    id,
+    label,
+    color,
+    ...(description ? { description } : {}),
+  };
+  const limit = Number.isFinite(Number(input.monthlyLimitIRT))
+    ? Math.max(0, Math.round(Number(input.monthlyLimitIRT)))
+    : 0;
+
+  ledger.categories = [...categories, category];
+  ledger.budgets = [...ledger.budgets.filter((b) => b.category !== id), { category: id, monthlyLimitIRT: limit }];
+  writeLedger(ledger);
+  return { ledger, category };
+}
+
+export function updateCategoryOnServer(
+  id: string,
+  patch: {
+    label?: string;
+    color?: string;
+    description?: string;
+    monthlyLimitIRT?: number;
+  }
+): { ledger: LedgerData; category: CategoryDefinition } | null {
+  const ledger = readLedger();
+  const categories = resolveCategories(ledger.categories);
+  const idx = categories.findIndex((c) => c.id === id);
+  if (idx === -1) return null;
+
+  const current = categories[idx];
+  const nextLabel =
+    patch.label !== undefined ? normalizeCategoryLabel(patch.label) : current.label;
+  if (!nextLabel) {
+    throw new Error('نام دسته‌بندی نمی‌تواند خالی باشد.');
+  }
+  if (
+    categories.some((c) => c.id !== id && c.label.toLowerCase() === nextLabel.toLowerCase())
+  ) {
+    throw new Error('دسته‌بندی دیگری با این نام از قبل وجود دارد.');
+  }
+
+  const nextColor =
+    typeof patch.color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(patch.color.trim())
+      ? patch.color.trim()
+      : current.color;
+  const nextDesc =
+    patch.description !== undefined
+      ? normalizeCategoryDescription(patch.description)
+      : current.description;
+
+  const updated: CategoryDefinition = {
+    ...current,
+    label: nextLabel,
+    color: nextColor,
+    ...(nextDesc ? { description: nextDesc } : {}),
+  };
+  if (!nextDesc) {
+    delete updated.description;
+  }
+
+  const nextCategories = [...categories];
+  nextCategories[idx] = updated;
+  ledger.categories = nextCategories;
+
+  if (patch.monthlyLimitIRT !== undefined && Number.isFinite(Number(patch.monthlyLimitIRT))) {
+    const limit = Math.max(0, Math.round(Number(patch.monthlyLimitIRT)));
+    const hasBudget = ledger.budgets.some((b) => b.category === id);
+    ledger.budgets = hasBudget
+      ? ledger.budgets.map((b) => (b.category === id ? { ...b, monthlyLimitIRT: limit } : b))
+      : [...ledger.budgets, { category: id, monthlyLimitIRT: limit }];
+  }
+
+  writeLedger(ledger);
+  return { ledger, category: updated };
+}
+
+export function deleteCategoryOnServer(
+  id: string,
+  reassignToId?: string
+): { ledger: LedgerData; reassignedCount: number } {
+  const current = readLedger();
+  const res = deleteCategoryAndReassign({
+    categories: resolveCategories(current.categories),
+    budgets: current.budgets,
+    expenses: current.expenses,
+    targetId: id,
+    reassignToId,
+  });
+  const nextLedger: LedgerData = {
+    ...current,
+    categories: res.categories,
+    budgets: res.budgets,
+    expenses: res.expenses,
+  };
+  writeLedger(nextLedger);
+  return { ledger: nextLedger, reassignedCount: res.reassignedCount };
 }
 
 export function importLedgerOnServer(

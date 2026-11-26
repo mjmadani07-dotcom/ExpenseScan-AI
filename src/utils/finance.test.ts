@@ -9,24 +9,43 @@ import {
   toPersianDigits,
 } from './jalali';
 import {
+  DEFAULT_CATEGORIES,
   DEFAULT_EXPENSE_FILTERS,
   clearLedgerExpenses,
   computeDomainBreakdown,
   computeMonthlyTrend,
+  computePurchaserBreakdown,
   convertRialTomanValues,
   convertTomanToDisplayUnit,
   countSeedExpenses,
+  createCustomCategoryId,
+  deleteCategoryAndReassign,
   derivePaymentStatusFromTranches,
   detectPotentialDuplicates,
   exportExpensesToCsv,
   filterExpenses,
   formatCompactCurrency,
+  getCategoryLabel,
+  getUniquePurchasers,
   mergeLedgerData,
+  normalizePurchaserName,
   normalizeToToman,
   parseAndValidateLedgerImport,
+  sanitizeCategories,
   summarizeExpensePayments,
 } from './finance';
-import { normalizeExtractedExpenseList, stripJsonCodeFences } from './aiSchema';
+import { buildExpenseWorkbook, exportExpensesToXlsxBuffer } from './excelExport';
+import {
+  buildExtractionSystemInstruction,
+  normalizeExtractedExpenseList,
+  stripJsonCodeFences,
+} from './aiSchema';
+import {
+  buildGeminiEndpoints,
+  buildOpenAiChatCompletionsUrl,
+  validateClientBaseUrl,
+  validateServerBaseUrl,
+} from './aiUrls';
 import { maskApiKey } from './localKeyVault';
 import type { CategoryBudget, ExchangeRates, ExpenseRecord, LedgerData } from '../types/expense';
 
@@ -417,7 +436,7 @@ test('clearLedgerExpenses removes only seed examples or all records cleanly', ()
   assert.equal(clearedAll.next.expenses.length, 0);
 });
 
-test('aiSchema normalizes provider output and masks API keys safely', () => {
+test('aiSchema normalizes provider output, strips redundant single tranches, and preserves true split payments', () => {
   const raw = stripJsonCodeFences('```json\n{"expenses":[]}\n```');
   assert.equal(raw, '{"expenses":[]}');
 
@@ -427,6 +446,371 @@ test('aiSchema normalizes provider output and masks API keys safely', () => {
   );
   assert.equal(normalized[0].date, '2026-11-25');
   assert.equal(normalized[0].currency, 'IRT');
+  assert.equal(normalized[0].paymentTranches, undefined);
+
+  // Redundant 1-item full-amount tranche on a paid invoice must be stripped
+  const paidWithFakeTranche = normalizeExtractedExpenseList(
+    [
+      {
+        title: 'رسید کارتخوان',
+        vendor: 'فروشگاه',
+        amount: 500000,
+        currency: 'IRT',
+        paymentStatus: 'paid',
+        paymentTranches: [
+          { title: 'پیش‌پرداخت', amount: 500000, method: 'corporate_card', status: 'paid' },
+        ],
+      },
+    ],
+    '2026-11-25'
+  );
+  assert.equal(paidWithFakeTranche[0].paymentStatus, 'paid');
+  assert.equal(paidWithFakeTranche[0].paymentTranches, undefined);
+
+  // Genuine advance + check split must be preserved with partial status
+  const trueSplit = normalizeExtractedExpenseList(
+    [
+      {
+        title: 'قرارداد طراحی',
+        vendor: 'استودیو',
+        amount: 10000000,
+        currency: 'IRT',
+        paymentStatus: 'paid',
+        paymentTranches: [
+          { title: 'پیش‌پرداخت', amount: 3000000, method: 'bank_transfer', status: 'paid' },
+          { title: 'چک مابقی', amount: 7000000, method: 'check', status: 'pending' },
+        ],
+      },
+    ],
+    '2026-11-25'
+  );
+  assert.equal(trueSplit[0].paymentStatus, 'partial');
+  assert.equal(trueSplit[0].paymentTranches?.length, 2);
+
   assert.equal(maskApiKey('sk-proj-1234567890abcd'), 'sk-p••••••abcd');
   assert.equal(maskApiKey('short'), '••••••••');
+});
+
+test('buildExpenseWorkbook and exportExpensesToXlsxBuffer generate styled RTL multi-sheet Excel', () => {
+  const sampleBudgets: CategoryBudget[] = [
+    { category: 'infrastructure', monthlyLimitIRT: 20_000_000 },
+  ];
+  const wb = buildExpenseWorkbook(SAMPLE_EXPENSES, sampleBudgets, SAMPLE_RATES, 'IRT');
+  assert.deepEqual(wb.SheetNames, [
+    'دفتر کل هزینه‌ها',
+    'خلاصه حوزه‌ها و بودجه',
+    'پرداخت‌های ترکیبی و چک‌ها',
+    'اقلام ریز فاکتورها',
+    'خلاصه مسئولان خرید',
+  ]);
+  assert.equal(wb.Workbook?.Views?.[0]?.RTL, true);
+
+  const ledgerSheet = wb.Sheets['دفتر کل هزینه‌ها'] as Record<string, { v?: unknown; s?: Record<string, unknown> }>;
+  assert.ok(ledgerSheet.A1?.s, 'Title banner should carry styling');
+  assert.ok(ledgerSheet.A4?.s, 'Header row should carry styling');
+  // Status cell (column Q = index 16 after inserting purchaser) on row 5 (first expense: paid)
+  assert.ok(ledgerSheet.Q5?.s, 'Status badge cell should carry color styling');
+
+  const bytes = exportExpensesToXlsxBuffer(SAMPLE_EXPENSES, sampleBudgets, SAMPLE_RATES, 'IRT');
+  assert.ok(bytes.byteLength > 2000, 'XLSX buffer should be non-trivial');
+  // Standard ZIP / XLSX magic header "PK"
+  assert.equal(bytes[0], 0x50);
+  assert.equal(bytes[1], 0x4b);
+});
+
+test('aiUrls validates Base URLs safely, blocks SSRF targets server-side, and resolves provider endpoints', () => {
+  // Client validation accepts https proxies and local HTTP LLM servers (e.g. Ollama)
+  assert.equal(validateClientBaseUrl(''), undefined);
+  assert.equal(validateClientBaseUrl('https://proxy.example.com/v1///'), 'https://proxy.example.com/v1');
+  assert.equal(validateClientBaseUrl('http://localhost:11434/v1/'), 'http://localhost:11434/v1');
+  assert.throws(() => validateClientBaseUrl('javascript:alert(1)'), /شروع شود/);
+  assert.throws(() => validateClientBaseUrl('not-a-url'), /معتبر نیست/);
+  assert.throws(() => validateClientBaseUrl('https://user:pass@proxy.example.com'), /نام کاربری/);
+
+  // Server validation enforces HTTPS and blocks loopback / link-local / private RFC1918
+  assert.equal(validateServerBaseUrl('https://api.avalai.ir/v1/'), 'https://api.avalai.ir/v1');
+  assert.throws(() => validateServerBaseUrl('http://proxy.example.com/v1'), /https/);
+  assert.throws(() => validateServerBaseUrl('https://localhost:8080/v1'), /داخلی یا لوکال/);
+  assert.throws(() => validateServerBaseUrl('https://127.0.0.1/v1'), /داخلی یا لوکال/);
+  assert.throws(() => validateServerBaseUrl('https://169.254.169.254/latest'), /داخلی یا لوکال/);
+  assert.throws(() => validateServerBaseUrl('https://192.168.1.10/v1'), /داخلی یا لوکال/);
+  assert.throws(() => validateServerBaseUrl('https://10.0.0.5/v1'), /داخلی یا لوکال/);
+
+  // OpenAI / OpenRouter URL normalization
+  assert.equal(
+    buildOpenAiChatCompletionsUrl('openai'),
+    'https://api.openai.com/v1/chat/completions'
+  );
+  assert.equal(
+    buildOpenAiChatCompletionsUrl('openrouter'),
+    'https://openrouter.ai/api/v1/chat/completions'
+  );
+  assert.equal(
+    buildOpenAiChatCompletionsUrl('openai', 'https://proxy.example.com'),
+    'https://proxy.example.com/v1/chat/completions'
+  );
+  assert.equal(
+    buildOpenAiChatCompletionsUrl('openai', 'https://api.avalai.ir/v1'),
+    'https://api.avalai.ir/v1/chat/completions'
+  );
+  assert.equal(
+    buildOpenAiChatCompletionsUrl('openai', 'https://custom.ai/gw/v1/chat/completions'),
+    'https://custom.ai/gw/v1/chat/completions'
+  );
+
+  // Gemini URL normalization (both SDK baseUrl and direct REST)
+  assert.deepEqual(buildGeminiEndpoints('gemini-2.5-flash'), {
+    sdkBaseUrl: 'https://generativelanguage.googleapis.com',
+    restGenerateContentUrl:
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+  });
+  assert.deepEqual(buildGeminiEndpoints('gemini-2.5-flash', 'https://gem-proxy.example.com/v1beta'), {
+    sdkBaseUrl: 'https://gem-proxy.example.com',
+    apiVersion: 'v1beta',
+    restGenerateContentUrl:
+      'https://gem-proxy.example.com/v1beta/models/gemini-2.5-flash:generateContent',
+  });
+  assert.deepEqual(buildGeminiEndpoints('gemini-2.5-flash', 'https://gem-proxy.example.com'), {
+    sdkBaseUrl: 'https://gem-proxy.example.com',
+    restGenerateContentUrl:
+      'https://gem-proxy.example.com/v1beta/models/gemini-2.5-flash:generateContent',
+  });
+});
+
+test('purchaser normalization, filtering, per-person totals, and AI extraction work accurately', () => {
+  assert.equal(normalizePurchaserName('  علی   رضایی '), 'علی رضایی');
+  assert.equal(normalizePurchaserName('   '), undefined);
+
+  const withPurchasers: ExpenseRecord[] = [
+    {
+      ...SAMPLE_EXPENSES[0],
+      purchaser: 'علی رضایی',
+      paymentMethod: 'personal_card', // 4,500,000 IRT
+    },
+    {
+      ...SAMPLE_EXPENSES[1],
+      purchaser: '  علی   رضایی ',
+      paymentMethod: 'corporate_card', // 6,500,000 IRT
+    },
+    {
+      ...SAMPLE_EXPENSES[2],
+      purchaser: 'سارا کریمی',
+      paymentMethod: 'petty_cash', // 12,000,000 IRT pending
+    },
+    {
+      ...SAMPLE_EXPENSES[2],
+      id: 'exp-4',
+      purchaser: undefined,
+      amount: 1000000,
+      paymentMethod: 'bank_transfer',
+      paymentStatus: 'paid',
+    },
+  ];
+
+  const unique = getUniquePurchasers(withPurchasers);
+  assert.equal(unique.length, 2);
+  assert.ok(unique.includes('علی رضایی'));
+  assert.ok(unique.includes('سارا کریمی'));
+
+  const aliOnly = filterExpenses(
+    withPurchasers,
+    { ...DEFAULT_EXPENSE_FILTERS, purchaser: 'علی رضایی' },
+    new Date('2026-11-25'),
+    SAMPLE_RATES
+  );
+  assert.equal(aliOnly.length, 2);
+
+  const unassignedOnly = filterExpenses(
+    withPurchasers,
+    { ...DEFAULT_EXPENSE_FILTERS, purchaser: '__unassigned__' },
+    new Date('2026-11-25'),
+    SAMPLE_RATES
+  );
+  assert.equal(unassignedOnly.length, 1);
+  assert.equal(unassignedOnly[0].id, 'exp-4');
+
+  const queryMatch = filterExpenses(
+    withPurchasers,
+    { ...DEFAULT_EXPENSE_FILTERS, query: 'سارا کریمی' },
+    new Date('2026-11-25'),
+    SAMPLE_RATES
+  );
+  assert.equal(queryMatch.length, 1);
+  assert.equal(queryMatch[0].id, 'exp-3');
+
+  const breakdown = computePurchaserBreakdown(withPurchasers, SAMPLE_RATES);
+  assert.equal(breakdown.length, 3);
+  const sara = breakdown.find((p) => p.purchaserKey === 'سارا کریمی');
+  const ali = breakdown.find((p) => p.purchaserKey === 'علی رضایی');
+  const unassigned = breakdown.find((p) => p.isUnassigned);
+  assert.equal(sara?.totalIRT, 12000000);
+  assert.equal(sara?.personalOutOfPocketIRT, 12000000);
+  assert.equal(sara?.pendingIRT, 12000000);
+  assert.equal(ali?.totalIRT, 11000000);
+  assert.equal(ali?.personalOutOfPocketIRT, 4500000);
+  assert.equal(ali?.count, 2);
+  assert.equal(unassigned?.count, 1);
+
+  const aiParsed = normalizeExtractedExpenseList(
+    [
+      {
+        title: 'خرید کابل شبکه',
+        vendor: 'فروشگاه رایانه',
+        amount: 450000,
+        currency: 'IRT',
+        purchaser: '  مهدی   نوری ',
+        paymentMethod: 'personal_card',
+      },
+    ],
+    '2026-11-26'
+  );
+  assert.equal(aiParsed[0].purchaser, 'مهدی نوری');
+  assert.equal(aiParsed[0].paymentMethod, 'personal_card');
+});
+
+test('dynamic categories support CRUD, reassignment on delete, breakdown, exports, JSON sync, and AI extraction', () => {
+  const sanitized = sanitizeCategories([
+    { id: 'infrastructure', label: 'زیرساخت و کلود', color: '#0f766e', isDefault: true },
+    { id: 'cat_training', label: '  آموزش   سازمانی ', color: '#7c3aed', description: 'دوره، کارگاه، کتاب' },
+    { id: 'cat_training', label: 'تکراری', color: '#111111' }, // duplicate id ignored
+    { id: 'bad', label: '', color: '#000000' }, // empty label ignored
+  ]);
+  assert.equal(sanitized.length, 2);
+  assert.equal(sanitized[1].label, 'آموزش سازمانی');
+
+  const customCategories = [
+    ...DEFAULT_CATEGORIES,
+    {
+      id: createCustomCategoryId(DEFAULT_CATEGORIES.map((c) => c.id)),
+      label: 'آموزش سازمانی',
+      color: '#7c3aed',
+      description: 'دوره، کارگاه، کتاب',
+    },
+  ];
+  const customCat = customCategories[customCategories.length - 1];
+  assert.ok(customCat.id.startsWith('cat-'));
+  assert.equal(getCategoryLabel(customCat.id, customCategories), 'آموزش سازمانی');
+
+  const customExpenses: ExpenseRecord[] = [
+    ...SAMPLE_EXPENSES,
+    {
+      ...SAMPLE_EXPENSES[0],
+      id: 'exp-custom-1',
+      title: 'ثبت‌نام دوره معماری نرم‌افزار',
+      category: customCat.id,
+      amount: 8000000,
+      currency: 'IRT',
+      taxAmount: 0,
+      discountAmount: 0,
+    },
+  ];
+  const customBudgets: CategoryBudget[] = [
+    { category: 'infrastructure', monthlyLimitIRT: 20000000 },
+    { category: customCat.id, monthlyLimitIRT: 15000000 },
+  ];
+
+  // Domain breakdown includes the custom category with custom label & color
+  const breakdown = computeDomainBreakdown(
+    customExpenses,
+    customBudgets,
+    SAMPLE_RATES,
+    1,
+    customCategories
+  );
+  const trainingRow = breakdown.find((row) => row.category === customCat.id);
+  assert.equal(trainingRow?.label, 'آموزش سازمانی');
+  assert.equal(trainingRow?.color, '#7c3aed');
+  assert.equal(trainingRow?.totalIRT, 8000000);
+  assert.equal(trainingRow?.monthlyLimitIRT, 15000000);
+
+  // CSV & Excel use custom category label
+  const csv = exportExpensesToCsv(customExpenses, SAMPLE_RATES, customCategories);
+  assert.ok(csv.includes('آموزش سازمانی'));
+  const wb = buildExpenseWorkbook(
+    customExpenses,
+    customBudgets,
+    SAMPLE_RATES,
+    'IRT',
+    customCategories
+  );
+  const ledgerSheet = wb.Sheets['دفتر کل هزینه‌ها'] as Record<string, { v?: unknown }>;
+  const hasCustomLabelInExcel = Object.values(ledgerSheet).some(
+    (cell) => cell?.v === 'آموزش سازمانی'
+  );
+  assert.equal(hasCustomLabelInExcel, true);
+
+  // AI prompt & extraction recognize the custom category ID & keywords
+  const prompt = buildExtractionSystemInstruction('2026-11-26', true, customCategories);
+  assert.ok(prompt.includes(customCat.id));
+  assert.ok(prompt.includes('آموزش سازمانی'));
+  const extracted = normalizeExtractedExpenseList(
+    [
+      {
+        title: 'خرید دوره تخصصی React',
+        vendor: 'مکتب‌خونه',
+        amount: 2500000,
+        currency: 'IRT',
+        category: customCat.id,
+      },
+      {
+        title: 'هزینه نامعلوم',
+        vendor: 'متفرقه',
+        amount: 100000,
+        currency: 'IRT',
+        category: 'nonexistent_cat_id',
+      },
+    ],
+    '2026-11-26',
+    customCategories
+  );
+  assert.equal(extracted[0].category, customCat.id);
+  assert.equal(extracted[1].category, 'other');
+
+  // JSON import/merge preserves custom categories and custom expense category IDs
+  const exportedJson = JSON.stringify({
+    categories: customCategories,
+    budgets: customBudgets,
+    expenses: customExpenses,
+    rates: SAMPLE_RATES,
+  });
+  const imported = parseAndValidateLedgerImport(exportedJson);
+  assert.equal(imported.categories?.length, customCategories.length);
+  assert.equal(
+    imported.expenses.find((e) => e.id === 'exp-custom-1')?.category,
+    customCat.id
+  );
+  const merged = mergeLedgerData(
+    { categories: DEFAULT_CATEGORIES, budgets: [], expenses: [], rates: SAMPLE_RATES },
+    imported,
+    'merge'
+  );
+  assert.equal(merged.next.categories?.length, customCategories.length);
+
+  // Deleting custom category reassigns expenses cleanly and removes its budget
+  const deleted = deleteCategoryAndReassign({
+    categories: customCategories,
+    budgets: customBudgets,
+    expenses: customExpenses,
+    targetId: customCat.id,
+    reassignToId: 'hr_admin',
+  });
+  assert.equal(deleted.reassignedCount, 1);
+  assert.equal(deleted.categories.some((c) => c.id === customCat.id), false);
+  assert.equal(deleted.budgets.some((b) => b.category === customCat.id), false);
+  assert.equal(
+    deleted.expenses.find((e) => e.id === 'exp-custom-1')?.category,
+    'hr_admin'
+  );
+
+  // Cannot delete the last remaining category
+  assert.throws(
+    () =>
+      deleteCategoryAndReassign({
+        categories: [{ id: 'only_one', label: 'فقط یکی', color: '#0f766e' }],
+        budgets: [],
+        expenses: [],
+        targetId: 'only_one',
+      }),
+    /حداقل یک دسته‌بندی/
+  );
 });

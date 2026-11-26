@@ -107,6 +107,7 @@
       "trackingCode": "55109382",
       "paymentMethod": "corporate_card",
       "paymentStatus": "paid",
+      "purchaser": "علی رضایی",
       "projectTag": "تجهیز ایستگاه کار",
       "lineItems": [
         {
@@ -135,8 +136,9 @@
       "discountAmount": 0,
       "date": "2026-11-03",
       "invoiceNumber": "CF-2026-1103",
-      "paymentMethod": "corporate_card",
+      "paymentMethod": "personal_card",
       "paymentStatus": "paid",
+      "purchaser": "علی رضایی",
       "projectTag": "پلتفرم اصلی",
       "lineItems": [
         {
@@ -166,6 +168,7 @@
       "trackingCode": "31094822",
       "paymentMethod": "bank_transfer",
       "paymentStatus": "paid",
+      "purchaser": "امیرحسین احمدی",
       "lineItems": [
         {
           "description": "حمل‌ونقل درون‌شهری قرارداد سازمانی",
@@ -222,6 +225,7 @@
       "date": "2026-10-09",
       "paymentMethod": "petty_cash",
       "paymentStatus": "paid",
+      "purchaser": "سارا کریمی",
       "lineItems": [
         {
           "description": "کاغذ A4، تونر و ملزومات اداری",
@@ -255,8 +259,9 @@
       "date": "2026-09-27",
       "invoiceNumber": "ALB-33091",
       "trackingCode": "77410293",
-      "paymentMethod": "corporate_card",
+      "paymentMethod": "personal_card",
       "paymentStatus": "paid",
+      "purchaser": "سارا کریمی",
       "projectTag": "نمایشگاه صنعت",
       "lineItems": [
         {
@@ -347,6 +352,64 @@
       "sourceType": "text",
       "createdAt": "2026-08-15T12:00:00.000Z",
       "approvedAt": "2026-08-15T12:10:00.000Z"
+    }
+  ],
+  "categories": [
+    {
+      "id": "infrastructure",
+      "label": "زیرساخت و فناوری",
+      "color": "#0F766E",
+      "description": "سرور، دامنه، اینترنت، نرم‌افزار، کلود، API",
+      "isDefault": true
+    },
+    {
+      "id": "operations",
+      "label": "عملیات و لجستیک",
+      "color": "#0284C7",
+      "description": "حمل‌ونقل، پیک، بسته‌بندی، انبار، نگهداری",
+      "isDefault": true
+    },
+    {
+      "id": "marketing",
+      "label": "بازاریابی و فروش",
+      "color": "#D97706",
+      "description": "تبلیغات، رویداد، طراحی، تولید محتوا، سئو",
+      "isDefault": true
+    },
+    {
+      "id": "hr_admin",
+      "label": "اداری و منابع انسانی",
+      "color": "#4F46E5",
+      "description": "حقوق، پذیرایی، ملزومات اداری، اجاره، قبوض آب و برق",
+      "isDefault": true
+    },
+    {
+      "id": "equipment",
+      "label": "خرید تجهیزات",
+      "color": "#059669",
+      "description": "لپ‌تاپ، مانیتور، سخت‌افزار، مبلمان اداری",
+      "isDefault": true
+    },
+    {
+      "id": "tax_legal",
+      "label": "مالیات، بیمه و حقوقی",
+      "color": "#DC2626",
+      "description": "مالیات، بیمه تامین اجتماعی، عوارض، مشاوره حقوقی/مالیاتی",
+      "isDefault": true
+    },
+    {
+      "id": "travel",
+      "label": "سفر و ماموریت",
+      "color": "#7C3AED",
+      "description": "بلیط، هتل، ایاب‌وذهاب ماموریت",
+      "isDefault": true
+    },
+    {
+      "id": "other",
+      "label": "سایر هزینه‌ها",
+      "color": "#64748B",
+      "description": "سایر موارد",
+      "isDefault": true
     }
   ],
   "budgets": [

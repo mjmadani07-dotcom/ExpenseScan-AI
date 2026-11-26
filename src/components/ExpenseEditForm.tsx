@@ -7,6 +7,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type {
+  CategoryDefinition,
   CostCenter,
   Currency,
   DocumentType,
@@ -20,7 +21,6 @@ import type {
   PaymentTranche,
 } from '../types/expense';
 import {
-  CATEGORY_LABELS,
   COST_CENTER_LABELS,
   CURRENCY_LABELS,
   DOCUMENT_TYPE_LABELS,
@@ -29,7 +29,10 @@ import {
   convertRialTomanValues,
   derivePaymentStatusFromTranches,
   formatCurrency,
+  getCategoryLabel,
+  normalizePurchaserName,
   normalizeToToman,
+  resolveCategories,
 } from '../utils/finance';
 import { formatJalaliDate, toPersianDigits } from '../utils/jalali';
 import { JalaliDateInput } from './JalaliDateInput';
@@ -37,7 +40,9 @@ import { PaymentTranchesEditor } from './PaymentTranchesEditor';
 
 interface ExpenseEditFormProps {
   expense: ExpenseRecord;
+  categories?: CategoryDefinition[];
   rates: ExchangeRates;
+  purchaserSuggestions?: string[];
   isSaving: boolean;
   onSave: (patch: Partial<ExpenseFields>) => Promise<void>;
   onCancel: () => void;
@@ -45,11 +50,14 @@ interface ExpenseEditFormProps {
 
 export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
   expense,
+  categories,
   rates,
+  purchaserSuggestions = [],
   isSaving,
   onSave,
   onCancel,
 }) => {
+  const activeCategories = resolveCategories(categories);
   const [title, setTitle] = useState(expense.title);
   const [vendor, setVendor] = useState(expense.vendor);
   const [vendorTaxId, setVendorTaxId] = useState(expense.vendorTaxId ?? '');
@@ -69,6 +77,7 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
   const [dueDate, setDueDate] = useState<string | undefined>(expense.dueDate);
   const [invoiceNumber, setInvoiceNumber] = useState(expense.invoiceNumber ?? '');
   const [trackingCode, setTrackingCode] = useState(expense.trackingCode ?? '');
+  const [purchaser, setPurchaser] = useState(expense.purchaser ?? '');
   const [projectTag, setProjectTag] = useState(expense.projectTag ?? '');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(expense.paymentMethod);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>(expense.paymentStatus);
@@ -177,6 +186,7 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
       dueDate: dueDate || undefined,
       invoiceNumber: invoiceNumber.trim() || undefined,
       trackingCode: trackingCode.trim() || undefined,
+      purchaser: normalizePurchaserName(purchaser),
       projectTag: projectTag.trim() || undefined,
       paymentMethod,
       paymentStatus: finalStatus,
@@ -189,6 +199,11 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      <datalist id={`edit-purchasers-${expense.id}`}>
+        {purchaserSuggestions.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
       {error && (
         <div
           role="alert"
@@ -360,9 +375,19 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
             onChange={(e) => setCategory(e.target.value as ExpenseCategory)}
             className="w-full min-h-[40px] rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
           >
-            {(Object.keys(CATEGORY_LABELS) as ExpenseCategory[]).map((cat) => (
-              <option key={cat} value={cat}>
-                {CATEGORY_LABELS[cat]}
+            {(activeCategories.some((c) => c.id === category)
+              ? activeCategories
+              : [
+                  ...activeCategories,
+                  {
+                    id: category,
+                    label: getCategoryLabel(category, activeCategories),
+                    color: '#64748B',
+                  },
+                ]
+            ).map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.label}
               </option>
             ))}
           </select>
@@ -438,6 +463,11 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
               </option>
             ))}
           </select>
+          {paymentTranches.length > 0 && (
+            <span className="block mt-1 text-[11px] text-slate-500">
+              محاسبه‌شده از جدول پرداخت بخشی
+            </span>
+          )}
         </div>
 
         <div>
@@ -463,6 +493,21 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
             value={trackingCode}
             onChange={(e) => setTrackingCode(e.target.value)}
             className="w-full min-h-[40px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
+          />
+        </div>
+
+        <div>
+          <label htmlFor={`edit-purchaser-${expense.id}`} className="block text-xs font-semibold text-slate-700 mb-1">
+            مسئول خرید / پرداخت‌کننده
+          </label>
+          <input
+            id={`edit-purchaser-${expense.id}`}
+            type="text"
+            list={`edit-purchasers-${expense.id}`}
+            value={purchaser}
+            onChange={(e) => setPurchaser(e.target.value)}
+            placeholder="مثلاً: علی رضایی"
+            className="w-full min-h-[40px] rounded-xl border border-slate-200 px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
           />
         </div>
 
@@ -522,6 +567,7 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
         rates={rates}
         documentExchangeRate={effectiveRate}
         baseDate={date}
+        paymentStatus={paymentStatus}
         tranches={paymentTranches}
         onChange={handleTranchesChange}
       />
@@ -603,17 +649,34 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
         ))}
       </div>
 
-      {sourcePreviewUrl && (
-        <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-3">
-          <span className="text-xs text-slate-600">تصویر پیوست روی سند موجود است</span>
-          <button
-            type="button"
-            onClick={() => setSourcePreviewUrl(undefined)}
-            className="inline-flex items-center gap-1 min-h-[34px] px-3 rounded-lg border border-red-200 text-xs font-semibold text-red-700 hover:bg-red-50 cursor-pointer"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>حذف تصویر پیوست</span>
-          </button>
+      {expense.sourcePreviewUrl && (
+        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+          {sourcePreviewUrl ? (
+            <>
+              <span className="text-xs text-slate-600">تصویر پیوست روی این سند موجود است</span>
+              <button
+                type="button"
+                onClick={() => setSourcePreviewUrl(undefined)}
+                className="inline-flex items-center gap-1 min-h-[34px] px-3 rounded-lg border border-red-200 text-xs font-semibold text-red-700 hover:bg-red-50 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>حذف تصویر پس از ذخیره</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="text-xs text-amber-700 font-medium">
+                تصویر پیوست پس از ذخیره تغییرات حذف خواهد شد
+              </span>
+              <button
+                type="button"
+                onClick={() => setSourcePreviewUrl(expense.sourcePreviewUrl)}
+                className="inline-flex items-center gap-1 min-h-[34px] px-3 rounded-lg border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                بازگردانی تصویر
+              </button>
+            </>
+          )}
         </div>
       )}
 

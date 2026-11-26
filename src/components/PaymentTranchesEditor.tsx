@@ -1,9 +1,10 @@
-import React from 'react';
-import { Plus, Split, Trash2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { ChevronDown, ChevronUp, Plus, Split, Trash2 } from 'lucide-react';
 import type {
   Currency,
   ExchangeRates,
   PaymentMethod,
+  PaymentStatus,
   PaymentTranche,
   PaymentTrancheStatus,
 } from '../types/expense';
@@ -22,6 +23,7 @@ interface PaymentTranchesEditorProps {
   rates: ExchangeRates;
   documentExchangeRate?: number;
   baseDate: string;
+  paymentStatus?: PaymentStatus;
   tranches: PaymentTranche[];
   onChange: (next: PaymentTranche[]) => void;
 }
@@ -45,15 +47,20 @@ export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
   rates,
   documentExchangeRate,
   baseDate,
+  paymentStatus = 'paid',
   tranches,
   onChange,
 }) => {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [showSplitChooser, setShowSplitChooser] = useState(false);
+
   const summary = summarizeExpensePayments(
     {
       amount: totalAmount,
       currency,
       exchangeRateToToman: documentExchangeRate,
-      paymentStatus: 'partial',
+      paymentStatus: tranches.length > 0 ? 'partial' : paymentStatus,
       paymentTranches: tranches,
     },
     rates
@@ -63,6 +70,9 @@ export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
     const advance = Math.round(totalAmount * 0.3);
     const remainder = Math.max(0, totalAmount - advance);
     const now = Date.now();
+    setIsCollapsed(false);
+    setConfirmClearAll(false);
+    setShowSplitChooser(false);
     onChange([
       {
         id: `tr-${now}-1`,
@@ -94,6 +104,9 @@ export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
             ? remainingToAllocate
             : 0;
 
+    setIsCollapsed(false);
+    setConfirmClearAll(false);
+    setShowSplitChooser(false);
     onChange([
       ...tranches,
       {
@@ -112,43 +125,105 @@ export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
   };
 
   const removeTranche = (id: string) => {
-    onChange(tranches.filter((t) => t.id !== id));
+    const next = tranches.filter((t) => t.id !== id);
+    if (next.length === 0) {
+      setConfirmClearAll(false);
+      setIsCollapsed(false);
+      setShowSplitChooser(false);
+    }
+    onChange(next);
   };
+
+  const singlePaymentSubtitle =
+    paymentStatus === 'paid'
+      ? 'کل مبلغ این سند به صورت یکجا و کامل پرداخت شده است (بدون پیش‌پرداخت یا چک بعدی).'
+      : paymentStatus === 'overdue'
+        ? 'کل مبلغ به صورت یک‌مرحله‌ای در وضعیت سررسید گذشته ثبت شده است.'
+        : 'کل مبلغ به صورت یک‌مرحله‌ای ثبت شده است (یکجا و بدون تقسیم به چند قسط).';
 
   return (
     <div className="pt-3 border-t border-slate-100 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <span className="text-xs font-bold text-slate-800">
-            پرداخت بخشی / ترکیبی (پیش‌پرداخت، چک، اقساط)
-          </span>
-          {tranches.length === 0 && (
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              اگر مبلغ فاکتور در چند مرحله (مثلاً پیش‌پرداخت نقدی یا حواله و مابقی چک) پرداخت می‌شود، بخش‌ها را تعریف کنید.
-            </p>
-          )}
-        </div>
+      {tranches.length === 0 ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-3 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-block w-2 h-2 rounded-full ${
+                    paymentStatus === 'paid'
+                      ? 'bg-emerald-500'
+                      : paymentStatus === 'overdue'
+                        ? 'bg-red-500'
+                        : 'bg-amber-500'
+                  }`}
+                />
+                <span className="text-xs font-bold text-slate-800">
+                  نحوه تسویه:{' '}
+                  {paymentStatus === 'paid'
+                    ? 'پرداخت یکجا و کامل'
+                    : paymentStatus === 'overdue'
+                      ? 'یک‌مرحله‌ای (سررسید گذشته)'
+                      : 'یک‌مرحله‌ای (در انتظار پرداخت)'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                {singlePaymentSubtitle}
+              </p>
+            </div>
 
-        {tranches.length === 0 ? (
-          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={handlePresetAdvancePlusCheck}
-              className="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-lg bg-teal-50 border border-teal-200 text-xs font-semibold text-teal-800 hover:bg-teal-100 cursor-pointer"
+              onClick={() => setShowSplitChooser((v) => !v)}
+              className="inline-flex items-center gap-1.5 min-h-[34px] px-3 py-1 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-100 cursor-pointer shrink-0"
             >
-              <Split className="w-3.5 h-3.5" />
-              <span>پیش‌پرداخت + مابقی چک</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleAddTranche(false)}
-              className="inline-flex items-center gap-1 min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-100 text-xs font-semibold text-slate-700 hover:bg-slate-200 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>افزودن بخش پرداخت</span>
+              <Split className="w-3.5 h-3.5 text-slate-500" />
+              <span>
+                {showSplitChooser ? 'بستن گزینه‌های تقسیط' : 'تغییر به پرداخت بخشی / چکی'}
+              </span>
             </button>
           </div>
-        ) : (
+
+          {showSplitChooser && (
+            <div className="pt-2.5 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] text-slate-600">
+                اگر واقعاً این سند شامل پیش‌پرداخت و مابقی چک/قسط است، یکی از گزینه‌ها را انتخاب کنید:
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handlePresetAdvancePlusCheck}
+                  className="inline-flex items-center gap-1.5 min-h-[34px] px-3 py-1 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-800 hover:bg-slate-100 cursor-pointer"
+                >
+                  <Split className="w-3.5 h-3.5 text-slate-600" />
+                  <span>پیش‌پرداخت (۳۰٪) + مابقی چک</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAddTranche(false)}
+                  className="inline-flex items-center gap-1 min-h-[34px] px-3 py-1 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-800 hover:bg-slate-100 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5 text-slate-600" />
+                  <span>افزودن بخش / چک دلخواه</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSplitChooser(false)}
+                  className="min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-200/60 cursor-pointer"
+                >
+                  انصراف (ماندن در حالت یکجا)
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span className="text-xs font-bold text-slate-800">
+              پرداخت بخشی / ترکیبی (پیش‌پرداخت، چک، اقساط) — {toPersianDigits(tranches.length)} بخش
+            </span>
+          </div>
+
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -160,14 +235,60 @@ export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => onChange([])}
-              className="min-h-[34px] px-2.5 rounded-lg text-xs font-medium text-slate-500 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+              onClick={() => setIsCollapsed((v) => !v)}
+              className="inline-flex items-center gap-1 min-h-[34px] px-2.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
             >
-              حذف جدول پرداخت ترکیبی
+              {isCollapsed ? (
+                <>
+                  <ChevronDown className="w-3.5 h-3.5" />
+                  <span>نمایش جزئیات بخش‌ها</span>
+                </>
+              ) : (
+                <>
+                  <ChevronUp className="w-3.5 h-3.5" />
+                  <span>بستن نما (با حفظ اطلاعات)</span>
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmClearAll(true)}
+              className="min-h-[34px] px-2.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 cursor-pointer"
+            >
+              پاک کردن همه بخش‌ها (تبدیل به یکجا)
             </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {confirmClearAll && tranches.length > 0 && (
+        <div className="rounded-xl bg-red-50 border border-red-200 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+          <span className="text-xs font-semibold text-red-900 leading-relaxed">
+            آیا می‌خواهید تمام {toPersianDigits(tranches.length)} بخش پرداخت (پیش‌پرداخت / چک / قسط) این سند پاک شده و پرداخت به صورت یکجا ثبت شود؟
+          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmClearAll(false);
+                setIsCollapsed(false);
+                setShowSplitChooser(false);
+                onChange([]);
+              }}
+              className="min-h-[34px] px-3 py-1 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 cursor-pointer"
+            >
+              تایید حذف بخش‌ها
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmClearAll(false)}
+              className="min-h-[34px] px-3 py-1 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+            >
+              انصراف (حفظ اطلاعات)
+            </button>
+          </div>
+        </div>
+      )}
 
       {tranches.length > 0 && (
         <>
@@ -202,7 +323,8 @@ export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
             )}
           </div>
 
-          <div className="space-y-3">
+          {!isCollapsed && (
+            <div className="space-y-3">
             {tranches.map((tr, idx) => (
               <div
                 key={tr.id}
@@ -219,7 +341,7 @@ export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
                     className="inline-flex items-center gap-1 min-h-[32px] px-2 rounded-lg text-xs text-red-600 hover:bg-red-100 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>حذف</span>
+                    <span>حذف این بخش</span>
                   </button>
                 </div>
 
@@ -334,7 +456,8 @@ export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
                 </div>
               </div>
             ))}
-          </div>
+            </div>
+          )}
         </>
       )}
     </div>

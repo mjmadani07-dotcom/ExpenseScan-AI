@@ -6,10 +6,12 @@ import {
   FileText,
   Receipt,
   TrendingUp,
+  User,
   Wallet,
 } from 'lucide-react';
 import type {
   CategoryBudget,
+  CategoryDefinition,
   DisplayUnit,
   ExchangeRates,
   ExpenseCategory,
@@ -17,30 +19,35 @@ import type {
   TimeframeFilter,
 } from '../types/expense';
 import {
-  CATEGORY_COLORS,
-  CATEGORY_LABELS,
   COST_CENTER_LABELS,
   DEFAULT_EXPENSE_FILTERS,
   PAYMENT_STATUS_LABELS,
   computeDomainBreakdown,
   computeMonthlyTrend,
+  computePurchaserBreakdown,
   convertTomanToDisplayUnit,
   filterExpenses,
   formatCompactCurrency,
   formatCurrency,
+  getCategoryColor,
+  getCategoryLabel,
+  normalizePurchaserName,
   normalizeToToman,
+  resolveCategories,
   summarizeExpensePayments,
 } from '../utils/finance';
 import { formatJalaliDate, toPersianDigits } from '../utils/jalali';
 
 interface OverviewDashboardProps {
   expenses: ExpenseRecord[];
+  categories?: CategoryDefinition[];
   budgets: CategoryBudget[];
   rates: ExchangeRates;
   displayUnit: DisplayUnit;
   onChangeDisplayUnit: (unit: DisplayUnit) => void;
   onNavigateCapture: () => void;
   onOpenLedgerWithCategory: (category: ExpenseCategory | 'all') => void;
+  onOpenLedgerWithPurchaser: (purchaser: string) => void;
   onSelectExpense: (expense: ExpenseRecord) => void;
 }
 
@@ -62,14 +69,17 @@ function formatBarShortLabel(amountIRT: number, displayUnit: DisplayUnit): strin
 
 export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
   expenses,
+  categories,
   budgets,
   rates,
   displayUnit,
   onChangeDisplayUnit,
   onNavigateCapture,
   onOpenLedgerWithCategory,
+  onOpenLedgerWithPurchaser,
   onSelectExpense,
 }) => {
+  const activeCategories = useMemo(() => resolveCategories(categories), [categories]);
   const [timeframe, setTimeframe] = useState<TimeframeFilter>('6m');
   const [selectedCategory, setSelectedCategory] = useState<ExpenseCategory | 'all'>('all');
   const [hoveredMonthKey, setHoveredMonthKey] = useState<string | null>(null);
@@ -102,12 +112,24 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
   );
 
   const domainBreakdown = useMemo(
-    () => computeDomainBreakdown(periodExpenses, budgets, rates, periodMonthsCount),
-    [periodExpenses, budgets, rates, periodMonthsCount]
+    () =>
+      computeDomainBreakdown(
+        periodExpenses,
+        budgets,
+        rates,
+        periodMonthsCount,
+        activeCategories
+      ),
+    [periodExpenses, budgets, rates, periodMonthsCount, activeCategories]
   );
 
   const monthlyTrend = useMemo(
     () => computeMonthlyTrend(chartExpenses, rates),
+    [chartExpenses, rates]
+  );
+
+  const purchaserBreakdown = useMemo(
+    () => computePurchaserBreakdown(chartExpenses, rates).filter((p) => !p.isUnassigned),
     [chartExpenses, rates]
   );
 
@@ -231,7 +253,9 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-teal-50 border border-teal-200 px-4 py-3">
           <div className="text-sm text-teal-900">
             نمایش آمار و نمودار روند اختصاصی حوزه:{' '}
-            <strong className="font-bold">{CATEGORY_LABELS[selectedCategory]}</strong>
+            <strong className="font-bold">
+              {getCategoryLabel(selectedCategory, activeCategories)}
+            </strong>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -357,7 +381,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
                   const isActive = activeMonth?.monthKey === point.monthKey;
                   const barColor =
                     selectedCategory !== 'all'
-                      ? CATEGORY_COLORS[selectedCategory]
+                      ? getCategoryColor(selectedCategory, activeCategories)
                       : isActive
                         ? '#0F766E'
                         : '#0D9488';
@@ -430,7 +454,6 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
           <div className="space-y-3 flex-1">
             {domainBreakdown
               .filter((d) => d.count > 0 || d.monthlyLimitIRT > 0)
-              .slice(0, 7)
               .map((domain) => {
                 const isSelected = selectedCategory === domain.category;
                 const util = domain.budgetUtilizationPercent;
@@ -520,10 +543,18 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
                         <span>{exp.vendor}</span>
+                        {normalizePurchaserName(exp.purchaser) && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-medium text-teal-800">
+                              {normalizePurchaserName(exp.purchaser)}
+                            </span>
+                          </>
+                        )}
                         <span aria-hidden="true">·</span>
                         <span>{formatJalaliDate(exp.date)}</span>
                         <span aria-hidden="true">·</span>
-                        <span>{CATEGORY_LABELS[exp.category]}</span>
+                        <span>{getCategoryLabel(exp.category, activeCategories)}</span>
                         <span aria-hidden="true">·</span>
                         <span>{COST_CENTER_LABELS[exp.costCenter]}</span>
                       </div>
@@ -601,6 +632,50 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
           </button>
         </section>
       </div>
+
+      {/* Per-Purchaser Summary Card */}
+      {purchaserBreakdown.length > 0 && (
+        <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <User className="w-4 h-4 text-teal-700 shrink-0" />
+              <h2 className="text-base font-bold text-slate-900">
+                جمع هزینه بر اساس مسئول خرید
+              </h2>
+            </div>
+            <span className="text-xs text-slate-500">
+              برای مشاهده اسناد هر فرد روی کارت آن کلیک کنید
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {purchaserBreakdown.map((person) => (
+              <button
+                key={person.purchaserKey}
+                type="button"
+                onClick={() => onOpenLedgerWithPurchaser(person.purchaserKey)}
+                className="text-right rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-teal-50/50 hover:border-teal-300 p-3.5 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-bold text-slate-900 truncate">{person.label}</span>
+                  <span className="text-[11px] font-medium text-slate-500 tabular-nums shrink-0">
+                    {toPersianDigits(person.count)} سند
+                  </span>
+                </div>
+                <div className="mt-1.5 text-base font-bold text-slate-900 tabular-nums">
+                  {formatCompactCurrency(person.totalIRT, displayUnit)}
+                </div>
+                {person.personalOutOfPocketIRT > 0 && (
+                  <div className="mt-1 text-[11px] font-medium text-teal-700 tabular-nums">
+                    از کارت/جیب شخصی:{' '}
+                    {formatCompactCurrency(person.personalOutOfPocketIRT, displayUnit)}
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 };

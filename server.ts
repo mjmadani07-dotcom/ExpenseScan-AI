@@ -3,11 +3,14 @@ import express from 'express';
 import path from 'node:path';
 import { createServer as createViteServer } from 'vite';
 import {
+  addCategoryOnServer,
   addExpensesBatch,
   clearExpensesOnServer,
+  deleteCategoryOnServer,
   deleteExpense,
   importLedgerOnServer,
   readLedger,
+  updateCategoryOnServer,
   updateExpense,
   updateSettings,
 } from './server/storage.ts';
@@ -90,6 +93,11 @@ async function startServer() {
       const ledger = readLedger();
       const activeProvider = body.provider ?? ledger.aiConfig?.provider ?? 'gemini';
       const activeModel = body.model ?? ledger.aiConfig?.model;
+      const activeBaseUrl =
+        body.baseUrl !== undefined
+          ? body.baseUrl
+          : ledger.aiConfig?.baseUrls?.[activeProvider] ??
+            (ledger.aiConfig?.provider === activeProvider ? ledger.aiConfig?.baseUrl : undefined);
 
       const extracted = await extractStructuredExpenses({
         images: body.images,
@@ -98,6 +106,11 @@ async function startServer() {
         fileName: body.fileName,
         provider: activeProvider,
         model: activeModel,
+        baseUrl: activeBaseUrl,
+        categories:
+          Array.isArray(body.categories) && body.categories.length > 0
+            ? body.categories
+            : ledger.categories,
       });
 
       res.json({ expenses: extracted });
@@ -170,7 +183,67 @@ async function startServer() {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'خطا در ذخیره تنظیمات';
-      res.status(500).json({ error: message });
+      const isValidation = message.includes('Base URL');
+      res.status(isValidation ? 400 : 500).json({ error: message });
+    }
+  });
+
+  app.post('/api/categories', (req, res) => {
+    try {
+      const body = req.body as {
+        label?: string;
+        color?: string;
+        description?: string;
+        monthlyLimitIRT?: number;
+      };
+      const result = addCategoryOnServer({
+        label: String(body.label ?? ''),
+        color: body.color,
+        description: body.description,
+        monthlyLimitIRT: body.monthlyLimitIRT,
+      });
+      res.status(201).json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'خطا در ایجاد دسته‌بندی';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.patch('/api/categories/:id', (req, res) => {
+    try {
+      const body = req.body as {
+        label?: string;
+        color?: string;
+        description?: string;
+        monthlyLimitIRT?: number;
+      };
+      const result = updateCategoryOnServer(req.params.id, body);
+      if (!result) {
+        res.status(404).json({ error: 'دسته‌بندی مورد نظر یافت نشد.' });
+        return;
+      }
+      res.json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'خطا در ویرایش دسته‌بندی';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.delete('/api/categories/:id', (req, res) => {
+    try {
+      const body = (req.body ?? {}) as { reassignTo?: string };
+      const reassignTo =
+        typeof body.reassignTo === 'string'
+          ? body.reassignTo
+          : typeof req.query.reassignTo === 'string'
+            ? req.query.reassignTo
+            : undefined;
+      const result = deleteCategoryOnServer(req.params.id, reassignTo);
+      res.json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'خطا در حذف دسته‌بندی';
+      const status = message.includes('یافت نشد') ? 404 : 400;
+      res.status(status).json({ error: message });
     }
   });
 

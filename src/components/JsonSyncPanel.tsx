@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import type {
   CategoryBudget,
+  CategoryDefinition,
   ExchangeRates,
   ExpenseRecord,
   JsonImportMode,
@@ -20,6 +21,7 @@ import { formatJalaliDate, toPersianDigits } from '../utils/jalali';
 
 interface JsonSyncPanelProps {
   expenses: ExpenseRecord[];
+  categories?: CategoryDefinition[];
   budgets: CategoryBudget[];
   rates: ExchangeRates;
   onImportJson: (data: unknown, mode: JsonImportMode) => Promise<JsonImportStats>;
@@ -28,6 +30,7 @@ interface JsonSyncPanelProps {
 
 export const JsonSyncPanel: React.FC<JsonSyncPanelProps> = ({
   expenses,
+  categories,
   budgets,
   rates,
   onImportJson,
@@ -44,7 +47,11 @@ export const JsonSyncPanel: React.FC<JsonSyncPanelProps> = ({
   const [resultStats, setResultStats] = useState<JsonImportStats | null>(null);
 
   const handleExportJson = () => {
-    const payload = JSON.stringify({ expenses, budgets, rates }, null, 2);
+    const payload = JSON.stringify(
+      { expenses, ...(categories ? { categories } : {}), budgets, rates },
+      null,
+      2
+    );
     const blob = new Blob([payload], { type: 'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -176,7 +183,11 @@ export const JsonSyncPanel: React.FC<JsonSyncPanelProps> = ({
                   {toPersianDigits(previewInfo.expenses.length)} سند هزینه
                 </strong>{' '}
                 شناسایی شد
-                {previewInfo.budgets ? ' (شامل بودجه‌ها)' : ''}
+                {previewInfo.categories
+                  ? ` (شامل ${toPersianDigits(previewInfo.categories.length)} دسته‌بندی)`
+                  : previewInfo.budgets
+                    ? ' (شامل بودجه‌ها)'
+                    : ''}
               </span>
             ) : (
               <span>فایل JSON خروجی‌گرفته‌شده از این یا دستگاه دیگر را انتخاب کنید</span>

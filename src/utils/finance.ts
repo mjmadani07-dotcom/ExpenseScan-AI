@@ -1,7 +1,9 @@
 import type {
   CategoryBudget,
+  CategoryDefinition,
   CostCenter,
   Currency,
+  DefaultExpenseCategory,
   DisplayUnit,
   DocumentType,
   ExchangeRates,
@@ -22,7 +24,7 @@ import type {
 } from '../types/expense';
 import { formatJalaliDate, formatJalaliMonthLabel, getJalaliMonthKey, toPersianDigits } from './jalali';
 
-export const CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+export const CATEGORY_LABELS: Record<DefaultExpenseCategory, string> = {
   infrastructure: 'زیرساخت و فناوری',
   operations: 'عملیات و لجستیک',
   marketing: 'بازاریابی و فروش',
@@ -33,7 +35,7 @@ export const CATEGORY_LABELS: Record<ExpenseCategory, string> = {
   other: 'سایر هزینه‌ها',
 };
 
-export const CATEGORY_COLORS: Record<ExpenseCategory, string> = {
+export const CATEGORY_COLORS: Record<DefaultExpenseCategory, string> = {
   infrastructure: '#0F766E',
   operations: '#0284C7',
   marketing: '#D97706',
@@ -43,6 +45,177 @@ export const CATEGORY_COLORS: Record<ExpenseCategory, string> = {
   travel: '#7C3AED',
   other: '#64748B',
 };
+
+export const CATEGORY_DESCRIPTIONS: Record<DefaultExpenseCategory, string> = {
+  infrastructure: 'سرور، دامنه، اینترنت، نرم‌افزار، کلود، API',
+  operations: 'حمل‌ونقل، پیک، بسته‌بندی، انبار، نگهداری',
+  marketing: 'تبلیغات، رویداد، طراحی، تولید محتوا، سئو',
+  hr_admin: 'حقوق، پذیرایی، ملزومات اداری، اجاره، قبوض آب و برق',
+  equipment: 'لپ‌تاپ، مانیتور، سخت‌افزار، مبلمان اداری',
+  tax_legal: 'مالیات، بیمه تامین اجتماعی، عوارض، مشاوره حقوقی/مالیاتی',
+  travel: 'بلیط، هتل، ایاب‌وذهاب ماموریت',
+  other: 'سایر موارد',
+};
+
+export const CATEGORY_PALETTE_COLORS: { hex: string; label: string }[] = [
+  { hex: '#0F766E', label: 'سبز کله‌غازى' },
+  { hex: '#0284C7', label: 'آبی اقیانوسی' },
+  { hex: '#D97706', label: 'کهربایی' },
+  { hex: '#4F46E5', label: 'نیلی' },
+  { hex: '#059669', label: 'زمردی' },
+  { hex: '#DC2626', label: 'قرمز' },
+  { hex: '#7C3AED', label: 'بنفش' },
+  { hex: '#DB2777', label: 'سرخابی' },
+  { hex: '#0891B2', label: 'فیروزه‌ای' },
+  { hex: '#64748B', label: 'خاکستری' },
+];
+
+export const DEFAULT_CATEGORIES: CategoryDefinition[] = (
+  Object.keys(CATEGORY_LABELS) as DefaultExpenseCategory[]
+).map((id) => ({
+  id,
+  label: CATEGORY_LABELS[id],
+  color: CATEGORY_COLORS[id],
+  description: CATEGORY_DESCRIPTIONS[id],
+  isDefault: true,
+}));
+
+const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
+
+export function normalizeCategoryLabel(label?: string | null): string {
+  if (typeof label !== 'string') return '';
+  return label.trim().replace(/\s+/g, ' ').slice(0, 60);
+}
+
+export function normalizeCategoryDescription(desc?: string | null): string | undefined {
+  if (typeof desc !== 'string') return undefined;
+  const cleaned = desc.trim().replace(/\s+/g, ' ').slice(0, 140);
+  return cleaned || undefined;
+}
+
+export function sanitizeCategories(input: unknown): CategoryDefinition[] {
+  if (!Array.isArray(input) || input.length === 0) {
+    return DEFAULT_CATEGORIES.map((c) => ({ ...c }));
+  }
+
+  const seen = new Set<string>();
+  const result: CategoryDefinition[] = [];
+
+  for (const raw of input) {
+    if (!raw || typeof raw !== 'object') continue;
+    const rec = raw as Record<string, unknown>;
+    const id = typeof rec.id === 'string' ? rec.id.trim().slice(0, 64) : '';
+    const label = normalizeCategoryLabel(typeof rec.label === 'string' ? rec.label : '');
+    if (!id || !label || seen.has(id)) continue;
+    seen.add(id);
+
+    const rawColor = typeof rec.color === 'string' ? rec.color.trim() : '';
+    const color = HEX_COLOR_RE.test(rawColor)
+      ? rawColor
+      : CATEGORY_PALETTE_COLORS[result.length % CATEGORY_PALETTE_COLORS.length].hex;
+    const description = normalizeCategoryDescription(
+      typeof rec.description === 'string' ? rec.description : undefined
+    );
+
+    result.push({
+      id,
+      label,
+      color,
+      ...(description ? { description } : {}),
+      ...(rec.isDefault === true || id in CATEGORY_LABELS ? { isDefault: true } : {}),
+    });
+  }
+
+  return result.length > 0 ? result : DEFAULT_CATEGORIES.map((c) => ({ ...c }));
+}
+
+export function resolveCategories(categories?: CategoryDefinition[]): CategoryDefinition[] {
+  return sanitizeCategories(categories);
+}
+
+export function getCategoryLabel(
+  categoryId: string,
+  categories?: CategoryDefinition[]
+): string {
+  const list = categories && categories.length > 0 ? categories : DEFAULT_CATEGORIES;
+  const found = list.find((c) => c.id === categoryId);
+  if (found) return found.label;
+  if (categoryId in CATEGORY_LABELS) {
+    return CATEGORY_LABELS[categoryId as DefaultExpenseCategory];
+  }
+  return categoryId || 'سایر هزینه‌ها';
+}
+
+export function getCategoryColor(
+  categoryId: string,
+  categories?: CategoryDefinition[]
+): string {
+  const list = categories && categories.length > 0 ? categories : DEFAULT_CATEGORIES;
+  const found = list.find((c) => c.id === categoryId);
+  if (found && HEX_COLOR_RE.test(found.color)) return found.color;
+  if (categoryId in CATEGORY_COLORS) {
+    return CATEGORY_COLORS[categoryId as DefaultExpenseCategory];
+  }
+  return '#64748B';
+}
+
+export function createCustomCategoryId(existingIds: Iterable<string>): string {
+  const used = new Set(existingIds);
+  let candidate = `cat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+  while (used.has(candidate)) {
+    candidate = `cat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  }
+  return candidate;
+}
+
+export function deleteCategoryAndReassign(params: {
+  categories: CategoryDefinition[];
+  budgets: CategoryBudget[];
+  expenses: ExpenseRecord[];
+  targetId: string;
+  reassignToId?: string;
+}): {
+  categories: CategoryDefinition[];
+  budgets: CategoryBudget[];
+  expenses: ExpenseRecord[];
+  reassignedCount: number;
+} {
+  const currentCategories = resolveCategories(params.categories);
+  if (currentCategories.length <= 1) {
+    throw new Error('حداقل یک دسته‌بندی هزینه باید در برنامه باقی بماند.');
+  }
+
+  const targetExists = currentCategories.some((c) => c.id === params.targetId);
+  if (!targetExists) {
+    throw new Error('دسته‌بندی مورد نظر یافت نشد.');
+  }
+
+  const nextCategories = currentCategories.filter((c) => c.id !== params.targetId);
+  const fallbackTarget =
+    (params.reassignToId &&
+      params.reassignToId !== params.targetId &&
+      nextCategories.some((c) => c.id === params.reassignToId) &&
+      params.reassignToId) ||
+    (nextCategories.some((c) => c.id === 'other') ? 'other' : nextCategories[0].id);
+
+  let reassignedCount = 0;
+  const nextExpenses = params.expenses.map((exp) => {
+    if (exp.category === params.targetId) {
+      reassignedCount += 1;
+      return { ...exp, category: fallbackTarget };
+    }
+    return exp;
+  });
+
+  const nextBudgets = params.budgets.filter((b) => b.category !== params.targetId);
+
+  return {
+    categories: nextCategories,
+    budgets: nextBudgets,
+    expenses: nextExpenses,
+    reassignedCount,
+  };
+}
 
 export const COST_CENTER_LABELS: Record<CostCenter, string> = {
   engineering: 'فنی و محصول',
@@ -66,6 +239,7 @@ export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   corporate_card: 'کارت بانکی شرکتی',
+  personal_card: 'کارت / جیب شخصی فرد',
   bank_transfer: 'انتقال بانکی (پایا/ساتنا)',
   petty_cash: 'تنخواه‌گردان',
   online_gateway: 'درگاه پرداخت آنلاین',
@@ -95,6 +269,21 @@ export const SORT_BY_LABELS: Record<ExpenseSortBy, string> = {
   amount_asc: 'کمترین مبلغ',
 };
 
+export function normalizePurchaserName(name?: string | null): string | undefined {
+  if (typeof name !== 'string') return undefined;
+  const cleaned = name.trim().replace(/\s+/g, ' ').slice(0, 80);
+  return cleaned || undefined;
+}
+
+export function getUniquePurchasers(expenses: ExpenseRecord[]): string[] {
+  const seen = new Set<string>();
+  for (const exp of expenses) {
+    const clean = normalizePurchaserName(exp.purchaser);
+    if (clean) seen.add(clean);
+  }
+  return Array.from(seen).sort((a, b) => a.localeCompare(b, 'fa'));
+}
+
 export const DEFAULT_EXPENSE_FILTERS: ExpenseFilters = {
   query: '',
   category: 'all',
@@ -103,6 +292,7 @@ export const DEFAULT_EXPENSE_FILTERS: ExpenseFilters = {
   documentType: 'all',
   paymentMethod: 'all',
   currency: 'all',
+  purchaser: 'all',
   dateFrom: undefined,
   dateTo: undefined,
   timeframe: 'all',
@@ -356,6 +546,14 @@ export function filterExpenses(
       if (filters.paymentStatus !== 'all' && item.paymentStatus !== filters.paymentStatus) return false;
       if (filters.documentType !== 'all' && item.documentType !== filters.documentType) return false;
       if (filters.currency !== 'all' && item.currency !== filters.currency) return false;
+      if (filters.purchaser && filters.purchaser !== 'all') {
+        const cleanPurchaser = normalizePurchaserName(item.purchaser);
+        if (filters.purchaser === '__unassigned__') {
+          if (cleanPurchaser) return false;
+        } else if (cleanPurchaser !== normalizePurchaserName(filters.purchaser)) {
+          return false;
+        }
+      }
       if (filters.paymentMethod !== 'all') {
         const matchesMain = item.paymentMethod === filters.paymentMethod;
         const matchesTranche = (item.paymentTranches ?? []).some(
@@ -367,6 +565,7 @@ export function filterExpenses(
         const haystack = [
           item.title,
           item.vendor,
+          item.purchaser ?? '',
           item.vendorTaxId ?? '',
           item.invoiceNumber ?? '',
           item.trackingCode ?? '',
@@ -478,8 +677,15 @@ export function computeDomainBreakdown(
   expenses: ExpenseRecord[],
   budgets: CategoryBudget[],
   rates: ExchangeRates,
-  monthsCount = 1
+  monthsCount = 1,
+  categories?: CategoryDefinition[]
 ): DomainSummary[] {
+  const resolvedCategories = resolveCategories(categories);
+  const categoryMap = new Map<string, CategoryDefinition>();
+  for (const cat of resolvedCategories) {
+    categoryMap.set(cat.id, cat);
+  }
+
   const budgetMap = new Map<ExpenseCategory, number>();
   for (const b of budgets) {
     budgetMap.set(b.category, b.monthlyLimitIRT);
@@ -493,19 +699,27 @@ export function computeDomainBreakdown(
     grandTotal += val;
     const prev = totals.get(exp.category) ?? { totalIRT: 0, count: 0 };
     totals.set(exp.category, { totalIRT: prev.totalIRT + val, count: prev.count + 1 });
+    if (!categoryMap.has(exp.category)) {
+      categoryMap.set(exp.category, {
+        id: exp.category,
+        label: getCategoryLabel(exp.category, resolvedCategories),
+        color: getCategoryColor(exp.category, resolvedCategories),
+      });
+    }
   }
 
   const periodFactor = Math.max(1, monthsCount);
-  const categories = Object.keys(CATEGORY_LABELS) as ExpenseCategory[];
-  return categories
+  const orderedIds = Array.from(categoryMap.keys());
+  return orderedIds
     .map((category) => {
+      const def = categoryMap.get(category)!;
       const entry = totals.get(category) ?? { totalIRT: 0, count: 0 };
       const monthlyLimitIRT = budgetMap.get(category) ?? 0;
       const periodLimit = monthlyLimitIRT * periodFactor;
       return {
         category,
-        label: CATEGORY_LABELS[category],
-        color: CATEGORY_COLORS[category],
+        label: def.label,
+        color: def.color,
         totalIRT: entry.totalIRT,
         count: entry.count,
         sharePercent: grandTotal > 0 ? Math.round((entry.totalIRT / grandTotal) * 1000) / 10 : 0,
@@ -548,6 +762,93 @@ export function computeMonthlyTrend(
   return Array.from(map.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
 }
 
+export interface PurchaserSummary {
+  purchaserKey: string; // normalized name or '__unassigned__'
+  label: string;
+  isUnassigned: boolean;
+  totalIRT: number;
+  personalOutOfPocketIRT: number; // spent via personal_card, petty_cash, or cash
+  pendingIRT: number;
+  count: number;
+  sharePercent: number;
+}
+
+const OUT_OF_POCKET_METHODS: ReadonlySet<PaymentMethod> = new Set([
+  'personal_card',
+  'petty_cash',
+  'cash',
+]);
+
+export function computePurchaserBreakdown(
+  expenses: ExpenseRecord[],
+  rates: ExchangeRates
+): PurchaserSummary[] {
+  const map = new Map<
+    string,
+    {
+      label: string;
+      isUnassigned: boolean;
+      totalIRT: number;
+      personalOutOfPocketIRT: number;
+      pendingIRT: number;
+      count: number;
+    }
+  >();
+
+  let grandTotal = 0;
+
+  for (const exp of expenses) {
+    const cleanName = normalizePurchaserName(exp.purchaser);
+    const key = cleanName ?? '__unassigned__';
+    const isUnassigned = !cleanName;
+    const paySummary = summarizeExpensePayments(exp, rates);
+    grandTotal += paySummary.totalIRT;
+
+    let outOfPocketIRT = 0;
+    if (exp.paymentTranches && exp.paymentTranches.length > 0) {
+      for (const tr of exp.paymentTranches) {
+        if (OUT_OF_POCKET_METHODS.has(tr.method)) {
+          outOfPocketIRT += normalizeToToman(
+            tr.amount,
+            exp.currency,
+            rates,
+            exp.exchangeRateToToman
+          );
+        }
+      }
+      outOfPocketIRT = Math.min(paySummary.totalIRT, outOfPocketIRT);
+    } else if (OUT_OF_POCKET_METHODS.has(exp.paymentMethod)) {
+      outOfPocketIRT = paySummary.totalIRT;
+    }
+
+    const prev = map.get(key) ?? {
+      label: cleanName ?? 'بدون مسئول ثبت‌شده',
+      isUnassigned,
+      totalIRT: 0,
+      personalOutOfPocketIRT: 0,
+      pendingIRT: 0,
+      count: 0,
+    };
+
+    prev.totalIRT += paySummary.totalIRT;
+    prev.personalOutOfPocketIRT += outOfPocketIRT;
+    prev.pendingIRT += paySummary.remainingIRT;
+    prev.count += 1;
+    map.set(key, prev);
+  }
+
+  return Array.from(map.entries())
+    .map(([purchaserKey, entry]) => ({
+      purchaserKey,
+      ...entry,
+      sharePercent: grandTotal > 0 ? Math.round((entry.totalIRT / grandTotal) * 1000) / 10 : 0,
+    }))
+    .sort((a, b) => {
+      if (a.isUnassigned !== b.isUnassigned) return a.isUnassigned ? 1 : -1;
+      return b.totalIRT - a.totalIRT || a.label.localeCompare(b.label, 'fa');
+    });
+}
+
 function escapeCsvCell(value: string | number | undefined): string {
   const str = String(value ?? '');
   if (str.includes(',') || str.includes('"') || str.includes('\n')) {
@@ -556,11 +857,16 @@ function escapeCsvCell(value: string | number | undefined): string {
   return str;
 }
 
-export function exportExpensesToCsv(expenses: ExpenseRecord[], rates: ExchangeRates): string {
+export function exportExpensesToCsv(
+  expenses: ExpenseRecord[],
+  rates: ExchangeRates,
+  categories?: CategoryDefinition[]
+): string {
   const headers = [
     'تاریخ شمسی',
     'عنوان هزینه',
     'فروشنده / طرف حساب',
+    'مسئول خرید / پرداخت‌کننده',
     'نوع سند',
     'حوزه هزینه',
     'مرکز هزینه',
@@ -595,8 +901,9 @@ export function exportExpensesToCsv(expenses: ExpenseRecord[], rates: ExchangeRa
       formatJalaliDate(e.date),
       e.title,
       e.vendor,
+      normalizePurchaserName(e.purchaser) ?? '',
       DOCUMENT_TYPE_LABELS[e.documentType],
-      CATEGORY_LABELS[e.category],
+      getCategoryLabel(e.category, categories),
       COST_CENTER_LABELS[e.costCenter],
       e.amount,
       CURRENCY_LABELS[e.currency],
@@ -653,6 +960,7 @@ const VALID_IMPORT_COST_CENTERS: readonly CostCenter[] = [
 ];
 const VALID_IMPORT_PAYMENT_METHODS: readonly PaymentMethod[] = [
   'corporate_card',
+  'personal_card',
   'bank_transfer',
   'petty_cash',
   'online_gateway',
@@ -671,6 +979,7 @@ function clampImportEnum<T extends string>(val: unknown, allowed: readonly T[], 
 
 export interface ValidatedLedgerImport {
   expenses: ExpenseRecord[];
+  categories?: CategoryDefinition[];
   budgets?: CategoryBudget[];
   rates?: ExchangeRates;
 }
@@ -686,6 +995,7 @@ export function parseAndValidateLedgerImport(raw: unknown): ValidatedLedgerImpor
   }
 
   let rawExpenses: unknown[] | null = null;
+  let rawCategories: unknown;
   let rawBudgets: unknown;
   let rawRates: unknown;
 
@@ -695,6 +1005,7 @@ export function parseAndValidateLedgerImport(raw: unknown): ValidatedLedgerImpor
     const obj = payload as Record<string, unknown>;
     if (Array.isArray(obj.expenses)) {
       rawExpenses = obj.expenses;
+      rawCategories = obj.categories;
       rawBudgets = obj.budgets;
       rawRates = obj.rates;
     }
@@ -703,6 +1014,16 @@ export function parseAndValidateLedgerImport(raw: unknown): ValidatedLedgerImpor
   if (!rawExpenses) {
     throw new Error('ساختار فایل JSON نامعتبر است. فایل باید شامل آرایه expenses یا لیست اسناد باشد.');
   }
+
+  const categories =
+    Array.isArray(rawCategories) && rawCategories.length > 0
+      ? sanitizeCategories(rawCategories)
+      : undefined;
+
+  const allowedCategoryIds = new Set<string>([
+    ...VALID_IMPORT_CATEGORIES,
+    ...(categories ? categories.map((c) => c.id) : []),
+  ]);
 
   const nowIso = new Date().toISOString();
   const todayIso = nowIso.slice(0, 10);
@@ -785,6 +1106,12 @@ export function parseAndValidateLedgerImport(raw: unknown): ValidatedLedgerImpor
         ? rec.id.trim()
         : `imp-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`;
 
+    const rawCat = typeof rec.category === 'string' ? rec.category.trim().slice(0, 64) : '';
+    const category: ExpenseCategory =
+      rawCat && (allowedCategoryIds.has(rawCat) || rawCat.startsWith('cat-'))
+        ? rawCat
+        : 'other';
+
     return {
       id,
       title,
@@ -794,7 +1121,7 @@ export function parseAndValidateLedgerImport(raw: unknown): ValidatedLedgerImpor
           ? rec.vendorTaxId.trim()
           : undefined,
       documentType: clampImportEnum(rec.documentType, VALID_IMPORT_DOC_TYPES, 'invoice'),
-      category: clampImportEnum(rec.category, VALID_IMPORT_CATEGORIES, 'other'),
+      category,
       costCenter: clampImportEnum(rec.costCenter, VALID_IMPORT_COST_CENTERS, 'general'),
       amount,
       currency,
@@ -818,6 +1145,10 @@ export function parseAndValidateLedgerImport(raw: unknown): ValidatedLedgerImpor
       dueDate:
         typeof rec.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rec.dueDate)
           ? rec.dueDate
+          : undefined,
+      purchaser:
+        typeof rec.purchaser === 'string'
+          ? normalizePurchaserName(rec.purchaser)
           : undefined,
       projectTag:
         typeof rec.projectTag === 'string' && rec.projectTag.trim()
@@ -853,9 +1184,12 @@ export function parseAndValidateLedgerImport(raw: unknown): ValidatedLedgerImpor
   if (Array.isArray(rawBudgets)) {
     const validBudgets = rawBudgets
       .filter((b): b is Record<string, unknown> => Boolean(b && typeof b === 'object'))
-      .filter((b) => (VALID_IMPORT_CATEGORIES as readonly string[]).includes(String(b.category)))
+      .filter((b) => {
+        const cat = String(b.category ?? '').trim();
+        return Boolean(cat) && (allowedCategoryIds.has(cat) || cat.startsWith('cat-'));
+      })
       .map((b) => ({
-        category: b.category as ExpenseCategory,
+        category: String(b.category).trim(),
         monthlyLimitIRT: Number.isFinite(Number(b.monthlyLimitIRT))
           ? Math.max(0, Math.round(Number(b.monthlyLimitIRT)))
           : 0,
@@ -875,7 +1209,7 @@ export function parseAndValidateLedgerImport(raw: unknown): ValidatedLedgerImpor
     }
   }
 
-  return { expenses, budgets, rates };
+  return { expenses, categories, budgets, rates };
 }
 
 export function mergeLedgerData(
@@ -883,12 +1217,16 @@ export function mergeLedgerData(
   incoming: ValidatedLedgerImport,
   mode: JsonImportMode
 ): { next: LedgerData; stats: JsonImportStats } {
+  const currentCategories = resolveCategories(current.categories);
+
   if (mode === 'replace') {
     const sorted = [...incoming.expenses].sort(
       (a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)
     );
+    const nextCategories = incoming.categories ?? currentCategories;
     const next: LedgerData = {
       expenses: sorted,
+      categories: nextCategories,
       budgets: incoming.budgets ?? current.budgets,
       rates: incoming.rates ?? current.rates,
       ...(current.aiConfig ? { aiConfig: current.aiConfig } : {}),
@@ -924,6 +1262,17 @@ export function mergeLedgerData(
     (a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)
   );
 
+  const catMap = new Map<string, CategoryDefinition>();
+  for (const c of currentCategories) catMap.set(c.id, c);
+  if (incoming.categories) {
+    for (const c of incoming.categories) {
+      if (!catMap.has(c.id)) {
+        catMap.set(c.id, c);
+      }
+    }
+  }
+  const nextCategories = Array.from(catMap.values());
+
   let nextBudgets = current.budgets;
   if (incoming.budgets && incoming.budgets.length > 0) {
     const budgetMap = new Map<ExpenseCategory, number>();
@@ -941,6 +1290,7 @@ export function mergeLedgerData(
 
   const next: LedgerData = {
     expenses: mergedExpenses,
+    categories: nextCategories,
     budgets: nextBudgets,
     rates: current.rates,
     ...(current.aiConfig ? { aiConfig: current.aiConfig } : {}),

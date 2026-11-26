@@ -10,7 +10,7 @@ export type DocumentType =
   | 'petty_cash'
   | 'other';
 
-export type ExpenseCategory =
+export type DefaultExpenseCategory =
   | 'infrastructure'
   | 'operations'
   | 'marketing'
@@ -19,6 +19,16 @@ export type ExpenseCategory =
   | 'tax_legal'
   | 'travel'
   | 'other';
+
+export type ExpenseCategory = string;
+
+export interface CategoryDefinition {
+  id: string;
+  label: string;
+  color: string;
+  description?: string;
+  isDefault?: boolean;
+}
 
 export type CostCenter =
   | 'engineering'
@@ -30,6 +40,7 @@ export type CostCenter =
 
 export type PaymentMethod =
   | 'corporate_card'
+  | 'personal_card'
   | 'bank_transfer'
   | 'petty_cash'
   | 'online_gateway'
@@ -81,6 +92,7 @@ export interface ExpenseFields {
   paymentStatus: PaymentStatus;
   paymentTranches?: PaymentTranche[];
   dueDate?: string;
+  purchaser?: string;
   projectTag?: string;
   notes?: string;
   lineItems: LineItem[];
@@ -117,6 +129,8 @@ export type AiProviderId = 'gemini' | 'openai' | 'openrouter';
 export interface AiConfig {
   provider: AiProviderId;
   model: string;
+  baseUrl?: string;
+  baseUrls?: Partial<Record<AiProviderId, string>>;
 }
 
 export interface AiProviderInfo {
@@ -124,6 +138,7 @@ export interface AiProviderInfo {
   label: string;
   envVarName: string;
   defaultModel: string;
+  defaultBaseUrl: string;
   suggestedModels: string[];
 }
 
@@ -135,6 +150,7 @@ export interface AiProviderStatus {
 
 export interface LedgerData {
   expenses: ExpenseRecord[];
+  categories?: CategoryDefinition[];
   budgets: CategoryBudget[];
   rates: ExchangeRates;
   aiConfig?: AiConfig;
@@ -157,6 +173,7 @@ export interface ExpenseFilters {
   documentType: DocumentType | 'all';
   paymentMethod: PaymentMethod | 'all';
   currency: Currency | 'all';
+  purchaser: string;
   dateFrom?: string; // YYYY-MM-DD
   dateTo?: string; // YYYY-MM-DD
   timeframe: TimeframeFilter;

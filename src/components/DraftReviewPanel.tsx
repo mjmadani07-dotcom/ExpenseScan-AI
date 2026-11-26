@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import type {
+  CategoryDefinition,
   CostCenter,
   Currency,
   DocumentType,
@@ -23,7 +24,6 @@ import type {
   PaymentTranche,
 } from '../types/expense';
 import {
-  CATEGORY_LABELS,
   COST_CENTER_LABELS,
   CURRENCY_LABELS,
   DOCUMENT_TYPE_LABELS,
@@ -33,7 +33,11 @@ import {
   derivePaymentStatusFromTranches,
   detectPotentialDuplicates,
   formatCurrency,
+  getCategoryLabel,
+  getUniquePurchasers,
+  normalizePurchaserName,
   normalizeToToman,
+  resolveCategories,
 } from '../utils/finance';
 import { formatJalaliDate, toPersianDigits } from '../utils/jalali';
 import { JalaliDateInput } from './JalaliDateInput';
@@ -43,6 +47,7 @@ interface DraftReviewPanelProps {
   drafts: ExtractedExpenseDraft[];
   previewPages: string[];
   existingExpenses: ExpenseRecord[];
+  categories?: CategoryDefinition[];
   rates: ExchangeRates;
   isSaving: boolean;
   saveError: string | null;
@@ -56,6 +61,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
   drafts,
   previewPages,
   existingExpenses,
+  categories,
   rates,
   isSaving,
   saveError,
@@ -64,12 +70,18 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
   onApprove,
   onCancel,
 }) => {
+  const activeCategories = useMemo(() => resolveCategories(categories), [categories]);
   const [activePageIndex, setActivePageIndex] = useState(0);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const selectedCount = useMemo(
     () => drafts.filter((d) => d.selected).length,
     [drafts]
+  );
+
+  const purchaserSuggestions = useMemo(
+    () => getUniquePurchasers(existingExpenses),
+    [existingExpenses]
   );
 
   const updateDraft = (tempId: string, patch: Partial<ExtractedExpenseDraft>) => {
@@ -172,6 +184,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
       ...fields,
       title: fields.title.trim(),
       vendor: fields.vendor.trim(),
+      purchaser: normalizePurchaserName(fields.purchaser),
       exchangeRateToToman:
         fields.currency === 'USD' || fields.currency === 'EUR'
           ? fields.exchangeRateToToman ?? rates[fields.currency]
@@ -189,6 +202,11 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
 
   return (
     <form onSubmit={handleSubmit} className="max-w-6xl mx-auto space-y-6 pb-24 md:pb-6">
+      <datalist id="draft-purchaser-suggestions">
+        {purchaserSuggestions.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -248,7 +266,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                 className="inline-flex items-center gap-1 min-h-[34px] px-2.5 py-1 rounded-lg border border-red-200 bg-red-50/70 text-[11px] font-semibold text-red-700 hover:bg-red-100 cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>حذف تصویر پیوست</span>
+                <span>حذف تصویر از این ثبت</span>
               </button>
             </div>
 
@@ -336,17 +354,34 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
               >
                 {/* Draft Card Header */}
                 <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                  <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={draft.selected}
-                      onChange={(e) => updateDraft(draft.tempId, { selected: e.target.checked })}
-                      className="w-5 h-5 rounded border-slate-300 text-teal-700 focus:ring-teal-600"
-                    />
-                    <span className="text-sm font-bold text-slate-900">
-                      ردیف {toPersianDigits(index + 1)}: {draft.title || 'پیش‌نویس هزینه جدید'}
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={draft.selected}
+                        onChange={(e) => updateDraft(draft.tempId, { selected: e.target.checked })}
+                        className="w-5 h-5 rounded border-slate-300 text-teal-700 focus:ring-teal-600"
+                      />
+                      <span className="text-sm font-bold text-slate-900">
+                        ردیف {toPersianDigits(index + 1)}: {draft.title || 'پیش‌نویس هزینه جدید'}
+                      </span>
+                    </label>
+                    <span
+                      className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${
+                        (draft.paymentTranches?.length ?? 0) > 0
+                          ? 'bg-sky-50 text-sky-700'
+                          : draft.paymentStatus === 'paid'
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'bg-amber-50 text-amber-700'
+                      }`}
+                    >
+                      {(draft.paymentTranches?.length ?? 0) > 0
+                        ? `پرداخت ترکیبی (${toPersianDigits(draft.paymentTranches!.length)} بخش)`
+                        : draft.paymentStatus === 'paid'
+                          ? 'تسویه یکجا و کامل'
+                          : `یک‌مرحله‌ای · ${PAYMENT_STATUS_LABELS[draft.paymentStatus]}`}
                     </span>
-                  </label>
+                  </div>
 
                   {drafts.length > 1 && (
                     <button
@@ -358,7 +393,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                       className="min-h-[36px] px-2.5 rounded-lg text-xs text-red-600 hover:bg-red-50 inline-flex items-center gap-1 cursor-pointer"
                     >
                       <X className="w-4 h-4" />
-                      <span>حذف ردیف</span>
+                      <span>حذف این پیش‌نویس</span>
                     </button>
                   )}
                 </div>
@@ -544,9 +579,19 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                       }
                       className="w-full min-h-[42px] rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
                     >
-                      {(Object.keys(CATEGORY_LABELS) as ExpenseCategory[]).map((cat) => (
-                        <option key={cat} value={cat}>
-                          {CATEGORY_LABELS[cat]}
+                      {(activeCategories.some((c) => c.id === draft.category)
+                        ? activeCategories
+                        : [
+                            ...activeCategories,
+                            {
+                              id: draft.category,
+                              label: getCategoryLabel(draft.category, activeCategories),
+                              color: '#64748B',
+                            },
+                          ]
+                      ).map((cat) => (
+                        <option key={cat.id} value={cat.id}>
+                          {cat.label}
                         </option>
                       ))}
                     </select>
@@ -619,6 +664,11 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                         </option>
                       ))}
                     </select>
+                    {(draft.paymentMethod === 'personal_card' || draft.paymentMethod === 'petty_cash') && (
+                      <span className="block mt-1 text-[11px] text-teal-700">
+                        برای محاسبه هزینه هر فرد، نام «مسئول خرید» را هم ثبت کنید.
+                      </span>
+                    )}
                   </div>
 
                   <div>
@@ -642,6 +692,11 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                         </option>
                       ))}
                     </select>
+                    {(draft.paymentTranches?.length ?? 0) > 0 && (
+                      <span className="block mt-1 text-[11px] text-slate-500">
+                        محاسبه‌شده از جدول پرداخت بخشی
+                      </span>
+                    )}
                   </div>
 
                   <div>
@@ -697,6 +752,26 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                         updateDraft(draft.tempId, { trackingCode: e.target.value || undefined })
                       }
                       className="w-full min-h-[42px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor={`purchaser-${draft.tempId}`}
+                      className="block text-xs font-semibold text-slate-700 mb-1.5"
+                    >
+                      مسئول خرید / پرداخت‌کننده
+                    </label>
+                    <input
+                      id={`purchaser-${draft.tempId}`}
+                      type="text"
+                      list="draft-purchaser-suggestions"
+                      value={draft.purchaser ?? ''}
+                      onChange={(e) =>
+                        updateDraft(draft.tempId, { purchaser: e.target.value || undefined })
+                      }
+                      placeholder="مثلاً: علی رضایی (اختیاری)"
+                      className="w-full min-h-[42px] rounded-xl border border-slate-200 px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
 
@@ -758,6 +833,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                   rates={rates}
                   documentExchangeRate={effectiveRate}
                   baseDate={draft.date}
+                  paymentStatus={draft.paymentStatus}
                   tranches={draft.paymentTranches ?? []}
                   onChange={(nextTranches) => handleUpdateTranches(draft, nextTranches)}
                 />

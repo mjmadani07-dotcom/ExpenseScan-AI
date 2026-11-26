@@ -1,9 +1,14 @@
-import type { AiProviderId, ExpenseFields } from '../types/expense';
+import type { AiProviderId, CategoryDefinition, ExpenseFields } from '../types/expense';
 import {
   buildExtractionSystemInstruction,
   normalizeExtractedExpenseList,
   stripJsonCodeFences,
 } from './aiSchema';
+import {
+  buildGeminiEndpoints,
+  buildOpenAiChatCompletionsUrl,
+  validateClientBaseUrl,
+} from './aiUrls';
 
 export interface ClientExtractImage {
   mimeType: string;
@@ -14,14 +19,13 @@ export interface ClientExtractParams {
   provider: AiProviderId;
   model: string;
   apiKey: string;
+  baseUrl?: string;
+  categories?: CategoryDefinition[];
   images?: ClientExtractImage[];
   text?: string;
   fileName?: string;
   signal?: AbortSignal;
 }
-
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 function formatClientAiError(providerLabel: string, status: number, bodyText: string): string {
   if (status === 401 || status === 403 || bodyText.includes('API_KEY_INVALID') || bodyText.includes('invalid_api_key')) {
@@ -45,15 +49,17 @@ export async function extractExpensesDirectlyFromBrowser(
   }
 
   const todayIso = new Date().toISOString().slice(0, 10);
-  const systemInstruction = buildExtractionSystemInstruction(todayIso, true);
+  const systemInstruction = buildExtractionSystemInstruction(todayIso, true, params.categories);
   const contextHint = params.fileName ? `نام فایل ورودی: ${params.fileName}\n` : '';
   const textPrompt = params.text?.trim()
     ? `${contextHint}لطفاً هزینه‌ها و جزئیات مالی متن/فایل زیر را استخراج و در JSON با کلید expenses برگردان:\n\n${params.text.trim()}`
-    : `${contextHint}لطفاً تمام اطلاعات مالی، اقلام فاکتور، تاریخ، مبلغ، مالیات، فروشنده و پرداخت‌های مرحله‌ای را از تصویر(های) پیوست‌شده استخراج و در JSON با کلید expenses برگردان.`;
+    : `${contextHint}لطفاً تمام اطلاعات مالی، اقلام فاکتور، تاریخ، مبلغ، مالیات، فروشنده و نحوه تسویه (یکجا، یا در صورت وجود پیش‌پرداخت/چک، بخش‌های پرداخت) را از تصویر(های) پیوست‌شده استخراج و در JSON با کلید expenses برگردان.`;
+
+  const validatedBaseUrl = validateClientBaseUrl(params.baseUrl);
 
   if (params.provider === 'gemini') {
-    const modelName = encodeURIComponent(params.model.trim() || 'gemini-4-hydrogen');
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
+    const modelName = params.model.trim() || 'gemini-4-hydrogen';
+    const { restGenerateContentUrl: url } = buildGeminiEndpoints(modelName, validatedBaseUrl);
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
     if (params.images && params.images.length > 0) {
@@ -102,12 +108,12 @@ export async function extractExpensesDirectlyFromBrowser(
     if (!Array.isArray(parsed.expenses) || parsed.expenses.length === 0) {
       throw new Error('هیچ هزینه یا فاکتور قابل استخراجی در این سند یافت نشد.');
     }
-    return normalizeExtractedExpenseList(parsed.expenses, todayIso);
+    return normalizeExtractedExpenseList(parsed.expenses, todayIso, params.categories);
   }
 
   // OpenAI or OpenRouter direct call from user's device
   const isOpenRouter = params.provider === 'openrouter';
-  const endpointUrl = isOpenRouter ? OPENROUTER_URL : OPENAI_URL;
+  const endpointUrl = buildOpenAiChatCompletionsUrl(params.provider, validatedBaseUrl);
   const providerLabel = isOpenRouter ? 'OpenRouter' : 'OpenAI';
 
   const userContent: Array<
@@ -164,5 +170,5 @@ export async function extractExpensesDirectlyFromBrowser(
   if (!Array.isArray(parsed.expenses) || parsed.expenses.length === 0) {
     throw new Error('هیچ هزینه یا فاکتور قابل استخراجی در این سند یافت نشد.');
   }
-  return normalizeExtractedExpenseList(parsed.expenses, todayIso);
+  return normalizeExtractedExpenseList(parsed.expenses, todayIso, params.categories);
 }
