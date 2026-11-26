@@ -6,3 +6,26 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Runtime data and generated files
+data/
+dev-dist/
+.aistudio/
+backups/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+
+# Android local/build/signing material
+android/.gradle/
+android/**/build/
+android/local.properties
+android/.idea/
+*.jks
+*.keystore
+*.apk
+*.aab
+key.properties
