@@ -330,7 +330,7 @@ export function importLedgerOnServer(
   mode: JsonImportMode
 ): { ledger: LedgerData; stats: JsonImportStats } {
   const current = readLedger();
-  const validated = parseAndValidateLedgerImport(rawData);
+  const validated = parseAndValidateLedgerImport(rawData, resolveCategories(current.categories), current.rates);
   const { next, stats } = mergeLedgerData(current, validated, mode);
   writeLedger(next);
   return { ledger: next, stats };

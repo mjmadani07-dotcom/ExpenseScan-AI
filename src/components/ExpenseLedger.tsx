@@ -128,6 +128,11 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
   const [isEditingFull, setIsEditingFull] = useState(false);
   const [tranchesDraft, setTranchesDraft] = useState<PaymentTranche[]>([]);
   const [trancheError, setTrancheError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const runMutation = async (action: () => Promise<void>) => {
+    setMutationError(null); setIsMutating(true);
+    try { await action(); return true; } catch (err) { setMutationError(err instanceof Error ? err.message : 'خطا در ذخیره اطلاعات'); return false; } finally { setIsMutating(false); }
+  };
 
   const seedCount = useMemo(() => countSeedExpenses(expenses), [expenses]);
 
@@ -235,9 +240,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
       fromCurrency: exp.currency,
       toCurrency,
     });
-    setIsMutating(true);
-    await onUpdateExpense(exp.id, converted);
-    setIsMutating(false);
+    if (!await runMutation(() => onUpdateExpense(exp.id, converted))) return;
   };
 
   const handleToggleTrancheStatus = async (exp: ExpenseRecord, trancheId: string) => {
@@ -252,12 +255,10 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
       nextTranches,
       exp.paymentStatus
     );
-    setIsMutating(true);
-    await onUpdateExpense(exp.id, {
+    if (!await runMutation(() => onUpdateExpense(exp.id, {
       paymentTranches: nextTranches,
       paymentStatus: nextStatus,
-    });
-    setIsMutating(false);
+    }))) return;
   };
 
   const handleSaveTranchesEdit = async (exp: ExpenseRecord) => {
@@ -274,13 +275,11 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
       exp.paymentStatus === 'partial' ? 'pending' : exp.paymentStatus
     );
     const unpaidTranche = nextTranches?.find((t) => t.status !== 'paid');
-    setIsMutating(true);
-    await onUpdateExpense(exp.id, {
+    if (!await runMutation(() => onUpdateExpense(exp.id, {
       paymentTranches: nextTranches,
       paymentStatus: nextStatus,
       ...(unpaidTranche ? { paymentMethod: unpaidTranche.method, dueDate: unpaidTranche.date ?? exp.dueDate } : {}),
-    });
-    setIsMutating(false);
+    }))) return;
     setIsEditingTranches(false);
   };
 
@@ -290,6 +289,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
 
   return (
     <div className="space-y-5">
+      {mutationError && <div role="alert" className="fixed bottom-24 left-4 right-4 z-[100] rounded-xl bg-red-100 border border-red-300 p-3 text-sm text-red-900 shadow-lg">{mutationError}<button type="button" className="mr-3 underline" onClick={() => setMutationError(null)}>بستن</button></div>}
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -380,7 +380,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                   try {
                     await onClearSamples();
                     setConfirmClearSamples(false);
-                  } finally {
+                  } catch (err) { setMutationError(err instanceof Error ? err.message : 'خطا در پاکسازی'); } finally {
                     setIsClearingSamples(false);
                   }
                 }}
@@ -1027,9 +1027,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                 isSaving={isMutating}
                 onCancel={() => setIsEditingFull(false)}
                 onSave={async (patch) => {
-                  setIsMutating(true);
-                  await onUpdateExpense(selectedExpense.id, patch);
-                  setIsMutating(false);
+                  if (!await runMutation(() => onUpdateExpense(selectedExpense.id, patch))) return;
                   setIsEditingFull(false);
                 }}
               />
@@ -1123,11 +1121,9 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                           type="button"
                           disabled={isMutating || rateDraft <= 0}
                           onClick={async () => {
-                            setIsMutating(true);
-                            await onUpdateExpense(selectedExpense.id, {
+                            if (!await runMutation(() => onUpdateExpense(selectedExpense.id, {
                               exchangeRateToToman: rateDraft,
-                            });
-                            setIsMutating(false);
+                            }))) return;
                           }}
                           className="inline-flex items-center gap-1 min-h-[36px] px-3 rounded-lg bg-teal-700 text-white text-xs font-semibold hover:bg-teal-800 disabled:opacity-40 cursor-pointer"
                         >
@@ -1287,9 +1283,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                           type="button"
                           disabled={isMutating}
                           onClick={async () => {
-                            setIsMutating(true);
-                            await onUpdateExpense(selectedExpense.id, { sourcePreviewUrl: undefined });
-                            setIsMutating(false);
+                            if (!await runMutation(() => onUpdateExpense(selectedExpense.id, { sourcePreviewUrl: undefined }))) return;
                             setConfirmRemovePreview(false);
                           }}
                           className="min-h-[30px] px-2.5 py-1 rounded-md bg-red-600 text-white text-[11px] font-semibold hover:bg-red-700 cursor-pointer"
@@ -1421,9 +1415,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                     type="button"
                     disabled={isMutating}
                     onClick={async () => {
-                      setIsMutating(true);
-                      await onTogglePaid(selectedExpense);
-                      setIsMutating(false);
+                      if (!await runMutation(() => onTogglePaid(selectedExpense))) return;
                     }}
                     className="inline-flex items-center gap-2 min-h-[42px] px-4 py-2 rounded-xl bg-teal-700 text-white text-xs font-semibold hover:bg-teal-800 disabled:opacity-50 cursor-pointer"
                   >
@@ -1445,9 +1437,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                         type="button"
                         disabled={isMutating}
                         onClick={async () => {
-                          setIsMutating(true);
-                          await onDeleteExpense(selectedExpense.id);
-                          setIsMutating(false);
+                          if (!await runMutation(() => onDeleteExpense(selectedExpense.id))) return;
                           setConfirmDeleteId(null);
                         }}
                         className="min-h-[42px] px-3.5 py-2 rounded-xl bg-red-600 text-white text-xs font-semibold hover:bg-red-700 cursor-pointer"

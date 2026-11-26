@@ -92,6 +92,8 @@ export function validateExpenseFields(raw: unknown, categories: CategoryDefiniti
 export function validateExpensePatch(current: ExpenseRecord, raw: unknown, categories: CategoryDefinition[], rates: ExchangeRates): ExpenseRecord {
   const patch=obj(raw,'ویرایش');
   exactKeys(patch,keys,'ویرایش');
+  const normalized = {...patch};
+  for (const k of optional) if (normalized[k] === null) normalized[k] = undefined;
   const {id,createdAt,approvedAt,...fields}=current;
-  return {...validateExpenseFields({...fields,...patch},categories,rates),id,createdAt,approvedAt};
+  return {...validateExpenseFields({...fields,...normalized},categories,rates),id,createdAt,approvedAt};
 }

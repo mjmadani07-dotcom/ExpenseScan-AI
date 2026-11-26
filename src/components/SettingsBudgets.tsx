@@ -255,7 +255,7 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
     try {
       await onClearLedger(confirmClearScope);
       setConfirmClearScope(null);
-    } finally {
+    } catch (err) { setSaveError(err instanceof Error ? err.message : 'خطا در پاکسازی'); } finally {
       setIsClearing(false);
     }
   };

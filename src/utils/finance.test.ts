@@ -858,3 +858,13 @@ test('strict expense validation rejects invalid patch and preserves identity', (
   assert.throws(()=>validateExpensePatch(current,{paymentTranches:[{id:'a',title:'قسط',amount:current.amount+1,method:'check',status:'pending'}]},DEFAULT_CATEGORIES,SAMPLE_RATES),/اقساط/);
   assert.throws(()=>parseAndValidateLedgerImport([{...current,currency:'XYZ'}]),/واحد پول/);
 });
+
+test('JSON import rejects invalid financial fields without coercion and preserves empty budgets',()=>{
+  const exp=SAMPLE_EXPENSES[0];
+  for(const patch of [{amount:'12'},{taxAmount:-1},{paymentStatus:'x'},{date:'2026-02-30'},{unknown:1},{lineItems:[{description:'x',quantity:1,unitPrice:'abc',totalPrice:1}]}]){
+    assert.throws(()=>parseAndValidateLedgerImport([{...exp,...patch}]),/نامعتبر/);
+  }
+  assert.throws(()=>parseAndValidateLedgerImport([exp,exp]),/تکراری/);
+  assert.throws(()=>parseAndValidateLedgerImport([{...SAMPLE_EXPENSES[1],exchangeRateToToman:undefined}]),/نرخ تاریخی/);
+  assert.deepEqual(parseAndValidateLedgerImport({expenses:[exp],budgets:[]}).budgets,[]);
+});

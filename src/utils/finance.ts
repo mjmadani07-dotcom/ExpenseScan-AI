@@ -1,3 +1,4 @@
+import { validateExpenseFields } from './expenseValidation';
 import type {
   CategoryBudget,
   CategoryDefinition,
@@ -1005,234 +1006,67 @@ export interface ValidatedLedgerImport {
   rates?: ExchangeRates;
 }
 
-export function parseAndValidateLedgerImport(raw: unknown): ValidatedLedgerImport {
-  let payload: unknown = raw;
-  if (typeof raw === 'string') {
-    try {
-      payload = JSON.parse(raw);
-    } catch {
-      throw new Error('فایل JSON معتبر نیست و قابل خواندن نمی‌باشد.');
-    }
+// Accept current exports and legacy arrays with missing IDs/timestamps only. Do not coerce invalid money.
+export function parseAndValidateLedgerImport(raw: unknown, currentCategories: CategoryDefinition[] = DEFAULT_CATEGORIES, currentRates: ExchangeRates = DEFAULT_FALLBACK_RATES): ValidatedLedgerImport {
+  let payload=raw;
+  if(typeof raw==='string') {
+    try { payload=JSON.parse(raw); } catch { throw new Error('فایل JSON معتبر نیست و قابل خواندن نمی‌باشد.'); }
   }
-
-  let rawExpenses: unknown[] | null = null;
-  let rawCategories: unknown;
-  let rawBudgets: unknown;
-  let rawRates: unknown;
-
-  if (Array.isArray(payload)) {
-    rawExpenses = payload;
-  } else if (payload && typeof payload === 'object') {
-    const obj = payload as Record<string, unknown>;
-    if (Array.isArray(obj.expenses)) {
-      rawExpenses = obj.expenses;
-      rawCategories = obj.categories;
-      rawBudgets = obj.budgets;
-      rawRates = obj.rates;
+  const object=Array.isArray(payload)?{expenses:payload}:payload as Record<string,unknown>;
+  if(!object || typeof object!=='object'||!Array.isArray(object.expenses)) throw new Error('ساختار فایل JSON نامعتبر است.');
+  const bad=(field:string):never=>{throw new Error('مقدار نامعتبر در فایل JSON: '+field);};
+  for(const k of Object.keys(object)) if(!['expenses','categories','budgets','rates','aiConfig','schemaVersion'].includes(k)) bad(k);
+  if(object.schemaVersion!==undefined && object.schemaVersion!==1) bad('schemaVersion');
+  let categories:CategoryDefinition[]|undefined;
+  if(object.categories!==undefined) {
+    if(!Array.isArray(object.categories)||!object.categories.length) bad('دسته‌بندی‌ها');
+    const rows=object.categories as unknown[];
+    const ids=new Set<string>(), labels=new Set<string>();
+    for(const item of rows){
+      if(!item||typeof item!=='object'||Array.isArray(item)) bad('دسته‌بندی');
+      const c=item as Record<string,unknown>;
+      if(Object.keys(c).some(k=>!['id','label','color','description','isDefault'].includes(k))) bad('فیلد دسته‌بندی');
+      if(typeof c.id!=='string'||!c.id.trim()||typeof c.label!=='string'||!c.label.trim()||typeof c.color!=='string'||!/^#[0-9a-f]{6}$/i.test(c.color)) bad('دسته‌بندی');
+      if(c.description!==undefined&&typeof c.description!=='string') bad('شرح دسته‌بندی');
+      if(c.isDefault!==undefined&&typeof c.isDefault!=='boolean') bad('isDefault');
+      const label=String(c.label).trim().toLowerCase();
+      if(ids.has(String(c.id))||labels.has(label)) bad('دسته‌بندی تکراری');
+      ids.add(String(c.id));labels.add(label);
     }
+    categories=sanitizeCategories(rows);
+    if(categories.length!==rows.length) bad('دسته‌بندی‌ها');
   }
-
-  if (!rawExpenses) {
-    throw new Error('ساختار فایل JSON نامعتبر است. فایل باید شامل آرایه expenses یا لیست اسناد باشد.');
+  const allowed=categories??resolveCategories(currentCategories);
+  let rates:ExchangeRates|undefined;
+  if(object.rates!==undefined){
+    const v=object.rates as Record<string,unknown>;
+    if(!v||typeof v!=='object'||Object.keys(v).some(k=>k!=='USD'&&k!=='EUR')||typeof v.USD!=='number'||typeof v.EUR!=='number'||!Number.isFinite(v.USD)||!Number.isFinite(v.EUR)||v.USD<=0||v.EUR<=0) bad('نرخ ارز');
+    rates={USD:v.USD as number,EUR:v.EUR as number};
   }
-
-  const categories =
-    Array.isArray(rawCategories) && rawCategories.length > 0
-      ? sanitizeCategories(rawCategories)
-      : undefined;
-
-  const allowedCategoryIds = new Set<string>([
-    ...VALID_IMPORT_CATEGORIES,
-    ...(categories ? categories.map((c) => c.id) : []),
-  ]);
-
-  const nowIso = new Date().toISOString();
-  const todayIso = businessDateIso();
-
-  const expenses: ExpenseRecord[] = rawExpenses.map((entry, index) => {
-    if (!entry || typeof entry !== 'object') {
-      throw new Error(`سند ردیف ${toPersianDigits(index + 1)} ساختار معتبری ندارد.`);
-    }
-    const rec = entry as Record<string, unknown>;
-    const title = typeof rec.title === 'string' ? rec.title.trim() : '';
-    const vendor = typeof rec.vendor === 'string' ? rec.vendor.trim() : '';
-    const amount = rec.amount;
-
-    if (!title || !vendor) {
-      throw new Error(
-        `سند ردیف ${toPersianDigits(index + 1)} فاقد عنوان یا نام فروشنده معتبر است.`
-      );
-    }
-    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
-      throw new Error(
-        `مبلغ سند «${title}» (ردیف ${toPersianDigits(index + 1)}) معتبر نیست.`
-      );
-    }
-
-    if (typeof rec.currency !== 'string' || !VALID_IMPORT_CURRENCIES.includes(rec.currency as Currency)) throw new Error(`واحد پول سند «${title}» معتبر نیست.`);
-    if (typeof rec.date !== 'string' || !parseIsoDate(rec.date)) throw new Error(`تاریخ سند «${title}» معتبر نیست.`);
-    const currency = rec.currency as Currency;
-    const dateStr =
-      typeof rec.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rec.date)
-        ? rec.date
-        : todayIso;
-
-    const lineItems: LineItem[] = Array.isArray(rec.lineItems)
-      ? rec.lineItems
-          .filter((li): li is Record<string, unknown> => Boolean(li && typeof li === 'object'))
-          .map((li) => ({
-            description: String(li.description ?? 'قلم فاکتور'),
-            quantity: Number(li.quantity) > 0 ? Number(li.quantity) : 1,
-            unitPrice: Number.isFinite(Number(li.unitPrice)) ? Number(li.unitPrice) : 0,
-            totalPrice: Number.isFinite(Number(li.totalPrice)) ? Number(li.totalPrice) : 0,
-          }))
-      : [];
-
-    const rawTranches = Array.isArray(rec.paymentTranches) ? rec.paymentTranches : [];
-    const paymentTranches: PaymentTranche[] = rawTranches
-      .filter((tr): tr is Record<string, unknown> => Boolean(tr && typeof tr === 'object'))
-      .map((tr, trIdx) => ({
-        id:
-          typeof tr.id === 'string' && tr.id.trim()
-            ? tr.id.trim()
-            : `tr-imp-${index}-${trIdx}-${Date.now()}`,
-        title: String(tr.title ?? `بخش ${trIdx + 1}`),
-        amount: Number.isFinite(Number(tr.amount)) ? Math.max(0, Number(tr.amount)) : 0,
-        method: clampImportEnum(tr.method, VALID_IMPORT_PAYMENT_METHODS, 'bank_transfer'),
-        status: clampImportEnum(tr.status, VALID_IMPORT_TRANCHE_STATUSES, 'pending'),
-        date:
-          typeof tr.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(tr.date)
-            ? tr.date
-            : undefined,
-        referenceCode:
-          typeof tr.referenceCode === 'string' && tr.referenceCode.trim()
-            ? tr.referenceCode.trim()
-            : undefined,
-        notes: typeof tr.notes === 'string' && tr.notes.trim() ? tr.notes.trim() : undefined,
-      }));
-
-    const paymentStatus = derivePaymentStatusFromTranches(
-      amount,
-      paymentTranches.length > 0 ? paymentTranches : undefined,
-      clampImportEnum(rec.paymentStatus, VALID_IMPORT_STATUSES, 'paid')
-    );
-
-    const exchangeRate =
-      (currency === 'USD' || currency === 'EUR') &&
-      Number.isFinite(Number(rec.exchangeRateToToman)) &&
-      Number(rec.exchangeRateToToman) > 0
-        ? Math.round(Number(rec.exchangeRateToToman))
-        : undefined;
-
-    const id =
-      typeof rec.id === 'string' && rec.id.trim()
-        ? rec.id.trim()
-        : `imp-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`;
-
-    const rawCat = typeof rec.category === 'string' ? rec.category.trim().slice(0, 64) : '';
-    const category: ExpenseCategory =
-      rawCat && (allowedCategoryIds.has(rawCat) || rawCat.startsWith('cat-'))
-        ? rawCat
-        : 'other';
-
-    return {
-      id,
-      title,
-      vendor,
-      vendorTaxId:
-        typeof rec.vendorTaxId === 'string' && rec.vendorTaxId.trim()
-          ? rec.vendorTaxId.trim()
-          : undefined,
-      documentType: clampImportEnum(rec.documentType, VALID_IMPORT_DOC_TYPES, 'invoice'),
-      category,
-      costCenter: clampImportEnum(rec.costCenter, VALID_IMPORT_COST_CENTERS, 'general'),
-      amount,
-      currency,
-      exchangeRateToToman: exchangeRate,
-      taxAmount: Number.isFinite(Number(rec.taxAmount)) ? Math.max(0, Number(rec.taxAmount)) : 0,
-      discountAmount: Number.isFinite(Number(rec.discountAmount))
-        ? Math.max(0, Number(rec.discountAmount))
-        : 0,
-      date: dateStr,
-      invoiceNumber:
-        typeof rec.invoiceNumber === 'string' && rec.invoiceNumber.trim()
-          ? rec.invoiceNumber.trim()
-          : undefined,
-      trackingCode:
-        typeof rec.trackingCode === 'string' && rec.trackingCode.trim()
-          ? rec.trackingCode.trim()
-          : undefined,
-      paymentMethod: clampImportEnum(rec.paymentMethod, VALID_IMPORT_PAYMENT_METHODS, 'corporate_card'),
-      paymentStatus,
-      paymentTranches: paymentTranches.length > 0 ? paymentTranches : undefined,
-      dueDate:
-        typeof rec.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rec.dueDate)
-          ? rec.dueDate
-          : undefined,
-      purchaser:
-        typeof rec.purchaser === 'string'
-          ? normalizePurchaserName(rec.purchaser)
-          : undefined,
-      projectTag:
-        typeof rec.projectTag === 'string' && rec.projectTag.trim()
-          ? rec.projectTag.trim()
-          : undefined,
-      notes: typeof rec.notes === 'string' && rec.notes.trim() ? rec.notes.trim() : undefined,
-      extractionNotes:
-        typeof rec.extractionNotes === 'string' && rec.extractionNotes.trim()
-          ? rec.extractionNotes.trim()
-          : undefined,
-      lineItems,
-      sourceType: clampImportEnum(rec.sourceType, VALID_IMPORT_SOURCE_TYPES, 'text'),
-      sourceFileName:
-        typeof rec.sourceFileName === 'string' && rec.sourceFileName.trim()
-          ? rec.sourceFileName.trim()
-          : undefined,
-      sourcePreviewUrl:
-        typeof rec.sourcePreviewUrl === 'string' && rec.sourcePreviewUrl.startsWith('data:image/')
-          ? rec.sourcePreviewUrl
-          : undefined,
-      pageCount:
-        Number.isFinite(Number(rec.pageCount)) && Number(rec.pageCount) > 0
-          ? Math.round(Number(rec.pageCount))
-          : undefined,
-      createdAt:
-        typeof rec.createdAt === 'string' && rec.createdAt.trim() ? rec.createdAt : nowIso,
-      approvedAt:
-        typeof rec.approvedAt === 'string' && rec.approvedAt.trim() ? rec.approvedAt : nowIso,
-    };
+  let budgets:CategoryBudget[]|undefined;
+  if(object.budgets!==undefined){
+    if(!Array.isArray(object.budgets)) bad('بودجه‌ها');
+    const ids=new Set<string>();
+    budgets=(object.budgets as unknown[]).map(item=>{
+      const b=item as Record<string,unknown>;
+      if(!b||typeof b!=='object'||Object.keys(b).some(k=>k!=='category'&&k!=='monthlyLimitIRT')||typeof b.category!=='string'||!allowed.some(c=>c.id===b.category)||ids.has(b.category)||typeof b.monthlyLimitIRT!=='number'||!Number.isFinite(b.monthlyLimitIRT)||b.monthlyLimitIRT<0||!Number.isSafeInteger(Math.round(b.monthlyLimitIRT*10))) bad('بودجه');
+      ids.add(String(b.category));return {category:String(b.category),monthlyLimitIRT:b.monthlyLimitIRT as number};
+    });
+  }
+  const now=new Date().toISOString(), ids=new Set<string>();
+  const expenses=object.expenses.map((item:unknown,index:number)=>{
+    if(!item||typeof item!=='object'||Array.isArray(item)) bad('ردیف '+(index+1));
+    const {id,createdAt,approvedAt,...fields}=item as Record<string,unknown>;
+    if(id!==undefined&&(typeof id!=='string'||!id.trim())) bad('شناسه سند');
+    const stableId=typeof id==='string'?id:globalThis.crypto.randomUUID();
+    if(ids.has(stableId)) bad('شناسه تکراری سند');
+    ids.add(stableId);
+    for(const value of [createdAt,approvedAt]) if(value!==undefined&&(typeof value!=='string'||!Number.isFinite(Date.parse(value)))) bad('زمان ثبت');
+    if((fields.currency==='USD'||fields.currency==='EUR')&&fields.exchangeRateToToman===undefined) bad('نرخ تاریخی سند ارزی');
+    const validated=validateExpenseFields(fields,allowed,rates??currentRates);
+    return {...validated,purchaser:normalizePurchaserName(validated.purchaser),id:stableId,createdAt:typeof createdAt==='string'?createdAt:now,approvedAt:typeof approvedAt==='string'?approvedAt:now};
   });
-
-  let budgets: CategoryBudget[] | undefined;
-  if (Array.isArray(rawBudgets)) {
-    const validBudgets = rawBudgets
-      .filter((b): b is Record<string, unknown> => Boolean(b && typeof b === 'object'))
-      .filter((b) => {
-        const cat = String(b.category ?? '').trim();
-        return Boolean(cat) && (allowedCategoryIds.has(cat) || cat.startsWith('cat-'));
-      })
-      .map((b) => ({
-        category: String(b.category).trim(),
-        monthlyLimitIRT: Number.isFinite(Number(b.monthlyLimitIRT))
-          ? Math.max(0, Math.round(Number(b.monthlyLimitIRT)))
-          : 0,
-      }));
-    if (validBudgets.length > 0) {
-      budgets = validBudgets;
-    }
-  }
-
-  let rates: ExchangeRates | undefined;
-  if (rawRates && typeof rawRates === 'object') {
-    const r = rawRates as Record<string, unknown>;
-    const usd = Number(r.USD);
-    const eur = Number(r.EUR);
-    if (Number.isFinite(usd) && usd > 0 && Number.isFinite(eur) && eur > 0) {
-      rates = { USD: Math.round(usd), EUR: Math.round(eur) };
-    }
-  }
-
-  return { expenses, categories, budgets, rates };
+  return {expenses,categories,budgets,rates};
 }
 
 export function mergeLedgerData(
@@ -1250,7 +1084,7 @@ export function mergeLedgerData(
     const next: LedgerData = {
       expenses: sorted,
       categories: nextCategories,
-      budgets: incoming.budgets ?? current.budgets,
+      budgets: incoming.budgets ?? current.budgets.filter(b => nextCategories.some(c => c.id === b.category)),
       rates: incoming.rates ?? current.rates,
       ...(current.aiConfig ? { aiConfig: current.aiConfig } : {}),
     };

@@ -17,7 +17,7 @@ import type {
   JsonImportStats,
 } from '../types/expense';
 import { parseAndValidateLedgerImport, type ValidatedLedgerImport } from '../utils/finance';
-import { formatJalaliDate, toPersianDigits } from '../utils/jalali';
+import { businessDateIso, formatJalaliDate, toPersianDigits } from '../utils/jalali';
 
 interface JsonSyncPanelProps {
   expenses: ExpenseRecord[];
@@ -56,7 +56,7 @@ export const JsonSyncPanel: React.FC<JsonSyncPanelProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const jDate = formatJalaliDate(new Date().toISOString().slice(0, 10)).replace(/\//g, '-');
+    const jDate = formatJalaliDate(businessDateIso()).replace(/\//g, '-');
     a.download = `hesabyar-ledger-${jDate}.json`;
     a.click();
     URL.revokeObjectURL(url);
@@ -69,7 +69,7 @@ export const JsonSyncPanel: React.FC<JsonSyncPanelProps> = ({
     try {
       const text = await file.text();
       const parsedJson = JSON.parse(text);
-      const validated = parseAndValidateLedgerImport(parsedJson);
+      const validated = parseAndValidateLedgerImport(parsedJson, categories, rates);
       setSelectedFileName(file.name);
       setRawJsonData(parsedJson);
       setPreviewInfo(validated);

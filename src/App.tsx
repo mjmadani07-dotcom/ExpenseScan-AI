@@ -74,6 +74,7 @@ export default function App() {
   const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [cachedOnly, setCachedOnly] = useState(false);
 
   const [pendingDrafts, setPendingDrafts] = useState<ExtractedExpenseDraft[] | null>(null);
   const [previewPages, setPreviewPages] = useState<string[]>([]);
@@ -120,6 +121,7 @@ export default function App() {
       if (!ledgerRes.ok) throw new Error('خطا در دریافت اطلاعات از سرور');
       const data = (await ledgerRes.json()) as LedgerData;
       setLedger(data);
+      setCachedOnly(false);
       saveCache(data);
       if (aiRes && aiRes.ok) {
         const statusData = (await aiRes.json()) as AiProviderStatus;
@@ -130,6 +132,7 @@ export default function App() {
       if (cached) {
         try {
           setLedger(JSON.parse(cached) as LedgerData);
+          setCachedOnly(true);
         } catch {
           setLoadError(err instanceof Error ? err.message : 'خطا در بارگذاری داده‌ها');
         }
@@ -162,31 +165,14 @@ export default function App() {
     setIsSavingBatch(true);
     setSaveError(null);
     try {
-      let created: ExpenseRecord[] = [];
-      try {
-        const res = await fetch('/api/expenses/batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ expenses: approvedItems }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.error || 'خطا در ذخیره هزینه‌ها');
-        }
-        created = (data.created ?? []) as ExpenseRecord[];
-      } catch (err) {
-        if (err instanceof TypeError) {
-          const nowIso = new Date().toISOString();
-          created = approvedItems.map((item, idx) => ({
-            ...item,
-            id: `local-${Date.now()}-${idx}`,
-            createdAt: nowIso,
-            approvedAt: nowIso,
-          }));
-        } else {
-          throw err;
-        }
-      }
+      const res = await fetch('/api/expenses/batch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expenses: approvedItems }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'خطا در ذخیره هزینه‌ها');
+      const created = data.created as ExpenseRecord[];
+      if (!Array.isArray(created) || created.length !== approvedItems.length) throw new Error('پاسخ ثبت سند نامعتبر است؛ قبل از تلاش مجدد دفتر را بررسی کنید.');
 
       setLedger((prev) => {
         const next = { ...prev, expenses: [...created, ...prev.expenses] };
@@ -211,9 +197,10 @@ export default function App() {
       const res = await fetch(`/api/expenses/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
+        body: JSON.stringify(patch, (_key, value) => value === undefined ? null : value),
       });
-      if (res.ok) {
+      if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.error || 'خطا در ویرایش سند'); }
+      {
         const data = await res.json();
         const updated = data.expense as ExpenseRecord;
         setLedger((prev) => {
@@ -228,19 +215,7 @@ export default function App() {
         showToast('اطلاعات سند بروزرسانی شد.');
       }
     } catch (err) {
-      if (err instanceof TypeError) {
-        setLedger((prev) => {
-          const nextExpenses = prev.expenses.map((e) =>
-            e.id === id ? { ...e, ...patch, id: e.id } : e
-          );
-          const next = { ...prev, expenses: nextExpenses };
-          saveCache(next);
-          const updated = nextExpenses.find((e) => e.id === id) ?? null;
-          setSelectedExpense(updated);
-          return next;
-        });
-        showToast('اطلاعات سند به صورت محلی بروزرسانی شد.');
-      }
+      throw new Error(err instanceof TypeError ? 'ارتباط با محل ذخیره‌سازی برقرار نشد؛ تغییر ثبت نشده یا نتیجه آن نامشخص است. دفتر را دوباره بارگذاری کنید.' : err instanceof Error ? err.message : 'خطا در ذخیره اطلاعات');
     }
   };
 
@@ -259,7 +234,8 @@ export default function App() {
   const handleDeleteExpense = async (id: string) => {
     try {
       const res = await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
-      if (res.ok) {
+      if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.error || 'خطا در حذف سند'); }
+      {
         setLedger((prev) => {
           const next = {
             ...prev,
@@ -272,18 +248,7 @@ export default function App() {
         showToast('سند هزینه حذف شد.');
       }
     } catch (err) {
-      if (err instanceof TypeError) {
-        setLedger((prev) => {
-          const next = {
-            ...prev,
-            expenses: prev.expenses.filter((e) => e.id !== id),
-          };
-          saveCache(next);
-          return next;
-        });
-        setSelectedExpense(null);
-        showToast('سند هزینه به صورت محلی حذف شد.');
-      }
+      throw new Error(err instanceof TypeError ? 'ارتباط با محل ذخیره‌سازی برقرار نشد؛ تغییر ثبت نشده یا نتیجه آن نامشخص است. دفتر را دوباره بارگذاری کنید.' : err instanceof Error ? err.message : 'خطا در ذخیره اطلاعات');
     }
   };
 
@@ -317,16 +282,7 @@ export default function App() {
       }
       showToast('تنظیمات هوش مصنوعی، بودجه‌ها و نرخ ارز ذخیره شدند.');
     } catch (err) {
-      if (err instanceof TypeError) {
-        setLedger((prev) => {
-          const next = { ...prev, budgets, rates, aiConfig };
-          saveCache(next);
-          return next;
-        });
-        showToast('تنظیمات به صورت محلی ذخیره شدند.');
-      } else {
-        throw err;
-      }
+      throw new Error(err instanceof TypeError ? 'ارتباط با محل ذخیره‌سازی برقرار نشد؛ تغییر ثبت نشده یا نتیجه آن نامشخص است. دفتر را دوباره بارگذاری کنید.' : err instanceof Error ? err.message : 'خطا در ذخیره اطلاعات');
     }
   };
 
@@ -356,20 +312,7 @@ export default function App() {
       );
       return stats;
     } catch (err) {
-      if (err instanceof TypeError) {
-        const validated = parseAndValidateLedgerImport(data);
-        const { next, stats } = mergeLedgerData(ledger, validated, mode);
-        setLedger(next);
-        saveCache(next);
-        setSelectedExpense(null);
-        showToast(
-          mode === 'replace'
-            ? `${toPersianDigits(stats.total)} سند به صورت محلی جایگزین شد.`
-            : `${toPersianDigits(stats.added)} سند جدید اضافه و ${toPersianDigits(stats.updated)} سند بروزرسانی شد.`
-        );
-        return stats;
-      }
-      throw err;
+      throw new Error(err instanceof TypeError ? 'ارتباط با محل ذخیره‌سازی برقرار نشد؛ تغییر ثبت نشده یا نتیجه آن نامشخص است. دفتر را دوباره بارگذاری کنید.' : err instanceof Error ? err.message : 'خطا در ذخیره اطلاعات');
     }
   };
 
@@ -398,21 +341,7 @@ export default function App() {
       );
       return removedCount;
     } catch (err) {
-      if (err instanceof TypeError) {
-        const { next, removedCount } = clearLedgerExpenses(ledger, scope);
-        setLedger(next);
-        saveCache(next);
-        setSelectedExpense((prev) =>
-          prev && next.expenses.some((e) => e.id === prev.id) ? prev : null
-        );
-        showToast(
-          scope === 'all'
-            ? `همه ${toPersianDigits(removedCount)} سند به صورت محلی پاکسازی شدند.`
-            : `${toPersianDigits(removedCount)} سند نمونه به صورت محلی پاکسازی شد.`
-        );
-        return removedCount;
-      }
-      throw err;
+      throw new Error(err instanceof TypeError ? 'ارتباط با محل ذخیره‌سازی برقرار نشد؛ تغییر ثبت نشده یا نتیجه آن نامشخص است. دفتر را دوباره بارگذاری کنید.' : err instanceof Error ? err.message : 'خطا در ذخیره اطلاعات');
     }
   };
 
@@ -443,40 +372,7 @@ export default function App() {
       saveCache(nextLedger);
       showToast(`دسته‌بندی «${created.label}» اضافه شد.`);
     } catch (err) {
-      if (err instanceof TypeError) {
-        const label = normalizeCategoryLabel(input.label);
-        if (!label) throw new Error('نام دسته‌بندی نمی‌تواند خالی باشد.');
-        if (activeCategories.some((c) => c.label.toLowerCase() === label.toLowerCase())) {
-          throw new Error('دسته‌بندی با این نام از قبل وجود دارد.');
-        }
-        const id = createCustomCategoryId(activeCategories.map((c) => c.id));
-        const desc = normalizeCategoryDescription(input.description);
-        const created: CategoryDefinition = {
-          id,
-          label,
-          color:
-            /^#[0-9A-Fa-f]{6}$/.test(input.color.trim())
-              ? input.color.trim()
-              : CATEGORY_PALETTE_COLORS[activeCategories.length % CATEGORY_PALETTE_COLORS.length].hex,
-          ...(desc ? { description: desc } : {}),
-        };
-        const limit = Number.isFinite(Number(input.monthlyLimitIRT))
-          ? Math.max(0, Math.round(Number(input.monthlyLimitIRT)))
-          : 0;
-        const nextLedger: LedgerData = {
-          ...ledger,
-          categories: [...activeCategories, created],
-          budgets: [
-            ...ledger.budgets.filter((b) => b.category !== id),
-            { category: id, monthlyLimitIRT: limit },
-          ],
-        };
-        setLedger(nextLedger);
-        saveCache(nextLedger);
-        showToast(`دسته‌بندی «${created.label}» به صورت محلی اضافه شد.`);
-        return;
-      }
-      throw err;
+      throw new Error(err instanceof TypeError ? 'ارتباط با محل ذخیره‌سازی برقرار نشد؛ تغییر ثبت نشده یا نتیجه آن نامشخص است. دفتر را دوباره بارگذاری کنید.' : err instanceof Error ? err.message : 'خطا در ذخیره اطلاعات');
     }
   };
 
@@ -500,35 +396,7 @@ export default function App() {
       saveCache(nextLedger);
       showToast(`دسته‌بندی «${updated.label}» بروزرسانی شد.`);
     } catch (err) {
-      if (err instanceof TypeError) {
-        const label = normalizeCategoryLabel(patch.label);
-        if (!label) throw new Error('نام دسته‌بندی نمی‌تواند خالی باشد.');
-        if (
-          activeCategories.some(
-            (c) => c.id !== id && c.label.toLowerCase() === label.toLowerCase()
-          )
-        ) {
-          throw new Error('دسته‌بندی دیگری با این نام از قبل وجود دارد.');
-        }
-        const desc = normalizeCategoryDescription(patch.description);
-        const nextCategories = activeCategories.map((c) => {
-          if (c.id !== id) return c;
-          const nextCat: CategoryDefinition = {
-            ...c,
-            label,
-            color: /^#[0-9A-Fa-f]{6}$/.test(patch.color.trim()) ? patch.color.trim() : c.color,
-            ...(desc ? { description: desc } : {}),
-          };
-          if (!desc) delete nextCat.description;
-          return nextCat;
-        });
-        const nextLedger: LedgerData = { ...ledger, categories: nextCategories };
-        setLedger(nextLedger);
-        saveCache(nextLedger);
-        showToast(`دسته‌بندی «${label}» به صورت محلی بروزرسانی شد.`);
-        return;
-      }
-      throw err;
+      throw new Error(err instanceof TypeError ? 'ارتباط با محل ذخیره‌سازی برقرار نشد؛ تغییر ثبت نشده یا نتیجه آن نامشخص است. دفتر را دوباره بارگذاری کنید.' : err instanceof Error ? err.message : 'خطا در ذخیره اطلاعات');
     }
   };
 
@@ -559,45 +427,13 @@ export default function App() {
           : 'دسته‌بندی با موفقیت حذف شد.'
       );
     } catch (err) {
-      if (err instanceof TypeError) {
-        const res = deleteCategoryAndReassign({
-          categories: activeCategories,
-          budgets: ledger.budgets,
-          expenses: ledger.expenses,
-          targetId: id,
-          reassignToId,
-        });
-        const nextLedger: LedgerData = {
-          ...ledger,
-          categories: res.categories,
-          budgets: res.budgets,
-          expenses: res.expenses,
-        };
-        setLedger(nextLedger);
-        saveCache(nextLedger);
-        if (ledgerCategoryFilter === id) {
-          setLedgerCategoryFilter('all');
-        }
-        setSelectedExpense((prev) =>
-          prev ? (nextLedger.expenses.find((e) => e.id === prev.id) ?? null) : null
-        );
-        showToast(
-          res.reassignedCount > 0
-            ? `دسته‌بندی به صورت محلی حذف و ${toPersianDigits(res.reassignedCount)} سند منتقل شد.`
-            : 'دسته‌بندی به صورت محلی حذف شد.'
-        );
-        return;
-      }
-      throw err;
+      throw new Error(err instanceof TypeError ? 'ارتباط با محل ذخیره‌سازی برقرار نشد؛ تغییر ثبت نشده یا نتیجه آن نامشخص است. دفتر را دوباره بارگذاری کنید.' : err instanceof Error ? err.message : 'خطا در ذخیره اطلاعات');
     }
   };
 
   const navigateTab = (tab: ActiveTab) => {
-    if (tab !== 'capture') {
-      setPendingDrafts(null);
-      setPreviewPages([]);
-      setSaveError(null);
-    }
+    // Preserve reviewed/paid AI drafts while navigating between tabs.
+    if (isSavingBatch) return;
     setActiveTab(tab);
   };
 
@@ -721,6 +557,7 @@ export default function App() {
           </div>
         ) : (
           <>
+            {cachedOnly && <div role="alert" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">دفتر از حافظه موقت خوانده شده است؛ ذخیره فقط پس از تأیید سرور انجام می‌شود. <button type="button" className="underline" onClick={loadLedger}>بارگذاری مجدد</button></div>}
             {activeTab === 'overview' && (
               <OverviewDashboard
                 expenses={ledger.expenses}
@@ -790,6 +627,7 @@ export default function App() {
                 }}
                 onApprove={handleApproveBatch}
                 onCancel={() => {
+                  if (!window.confirm('پیش‌نویس‌ها حذف شوند؟')) return;
                   setPendingDrafts(null);
                   setPreviewPages([]);
                   setSaveError(null);
