@@ -1,0 +1,57 @@
+name: Android baseline checks
+
+on:
+  push:
+    branches: [android]
+  pull_request:
+    branches: [android]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-baseline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Record toolchain
+        run: |
+          node --version
+          bun --version
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Type check
+        run: bun run lint
+      - name: Finance regression tests
+        run: bun run test
+      - name: Build existing web UI
+        run: bun run build
+      - name: Production startup smoke test
+        shell: bash
+        run: |
+          PORT=39123 npm start > /tmp/expensescan-smoke.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true; cat /tmp/expensescan-smoke.log' EXIT
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:39123/api/health > /tmp/expensescan-health.json; then
+              node -e "if(JSON.parse(require('node:fs').readFileSync('/tmp/expensescan-health.json','utf8')).status !== 'ok') process.exit(1)"
+              curl --fail --silent http://127.0.0.1:39123/ > /tmp/expensescan-index.html
+              grep -q '<html' /tmp/expensescan-index.html
+              exit 0
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then exit 1; fi
+            sleep 1
+          done
+          exit 1
