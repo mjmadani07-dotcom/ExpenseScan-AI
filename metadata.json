@@ -1,0 +1,6 @@
+{
+  "name": "حساب‌یار | ثبت هوشمند هزینه‌های شرکتی",
+  "description": "اپلیکیشن هوشمند ثبت و دسته‌بندی هزینه‌ها، فاکتورها و رسیدهای شرکتی از عکس، PDF و متن با تبدیل خودکار صفحات PDF به تصویر و تحلیل روند هزینه‌ها در گذر زمان",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

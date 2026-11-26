@@ -1,0 +1,686 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  Camera,
+  CheckCircle2,
+  LayoutDashboard,
+  ListOrdered,
+  Plus,
+  Settings,
+} from 'lucide-react';
+import type {
+  AiConfig,
+  AiProviderId,
+  AiProviderStatus,
+  CategoryBudget,
+  DisplayUnit,
+  ExchangeRates,
+  ExpenseCategory,
+  ExpenseFields,
+  ExpenseRecord,
+  ExtractedExpenseDraft,
+  JsonImportMode,
+  JsonImportStats,
+  LedgerData,
+} from './types/expense';
+import { OverviewDashboard } from './components/OverviewDashboard';
+import { CaptureWorkspace } from './components/CaptureWorkspace';
+import { DraftReviewPanel } from './components/DraftReviewPanel';
+import { ExpenseLedger } from './components/ExpenseLedger';
+import { SettingsBudgets } from './components/SettingsBudgets';
+import { PWAInstallButton } from './components/PWAInstallButton';
+import { OfflineIndicator } from './components/OfflineIndicator';
+import { toPersianDigits } from './utils/jalali';
+import {
+  clearLedgerExpenses,
+  mergeLedgerData,
+  parseAndValidateLedgerImport,
+} from './utils/finance';
+import {
+  loadLocalApiKeys,
+  removeLocalApiKey,
+  saveLocalApiKey,
+} from './utils/localKeyVault';
+
+type ActiveTab = 'overview' | 'capture' | 'ledger' | 'settings';
+
+const CACHE_KEY = 'hesabyar_ledger_cache_v1';
+const DISPLAY_UNIT_KEY = 'hesabyar_display_unit_v1';
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
+  const [displayUnit, setDisplayUnit] = useState<DisplayUnit>(() => {
+    try {
+      const saved = localStorage.getItem(DISPLAY_UNIT_KEY);
+      return saved === 'IRR' ? 'IRR' : 'IRT';
+    } catch {
+      return 'IRT';
+    }
+  });
+  const [ledger, setLedger] = useState<LedgerData>({
+    expenses: [],
+    budgets: [],
+    rates: { USD: 70000, EUR: 76000 },
+    aiConfig: { provider: 'gemini', model: 'gemini-4-hydrogen' },
+  });
+  const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [pendingDrafts, setPendingDrafts] = useState<ExtractedExpenseDraft[] | null>(null);
+  const [previewPages, setPreviewPages] = useState<string[]>([]);
+  const [isSavingBatch, setIsSavingBatch] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const [ledgerCategoryFilter, setLedgerCategoryFilter] = useState<ExpenseCategory | 'all'>('all');
+  const [selectedExpense, setSelectedExpense] = useState<ExpenseRecord | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [localApiKeys, setLocalApiKeys] = useState<Partial<Record<AiProviderId, string>>>({});
+
+  const handleChangeDisplayUnit = useCallback((unit: DisplayUnit) => {
+    setDisplayUnit(unit);
+    try {
+      localStorage.setItem(DISPLAY_UNIT_KEY, unit);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((prev) => (prev === msg ? null : prev));
+    }, 3500);
+  }, []);
+
+  const saveCache = (next: LedgerData) => {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(next));
+    } catch {
+      // Ignore storage quota errors
+    }
+  };
+
+  const loadLedger = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const [ledgerRes, aiRes] = await Promise.all([
+        fetch('/api/ledger'),
+        fetch('/api/ai/status').catch(() => null),
+      ]);
+      if (!ledgerRes.ok) throw new Error('خطا در دریافت اطلاعات از سرور');
+      const data = (await ledgerRes.json()) as LedgerData;
+      setLedger(data);
+      saveCache(data);
+      if (aiRes && aiRes.ok) {
+        const statusData = (await aiRes.json()) as AiProviderStatus;
+        setAiStatus(statusData);
+      }
+    } catch (err) {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        try {
+          setLedger(JSON.parse(cached) as LedgerData);
+        } catch {
+          setLoadError(err instanceof Error ? err.message : 'خطا در بارگذاری داده‌ها');
+        }
+      } else {
+        setLoadError(err instanceof Error ? err.message : 'خطا در بارگذاری داده‌ها');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadLedger();
+    loadLocalApiKeys().then(setLocalApiKeys).catch(() => {});
+  }, [loadLedger]);
+
+  const handleSaveLocalApiKey = async (provider: AiProviderId, key: string) => {
+    const next = await saveLocalApiKey(provider, key);
+    setLocalApiKeys(next);
+    showToast('کلید امنیتی شخصی روی همین دستگاه ذخیره شد.');
+  };
+
+  const handleRemoveLocalApiKey = async (provider: AiProviderId) => {
+    const next = await removeLocalApiKey(provider);
+    setLocalApiKeys(next);
+    showToast('کلید امنیتی شخصی از این دستگاه حذف شد.');
+  };
+
+  const handleApproveBatch = async (approvedItems: ExpenseFields[]) => {
+    setIsSavingBatch(true);
+    setSaveError(null);
+    try {
+      let created: ExpenseRecord[] = [];
+      try {
+        const res = await fetch('/api/expenses/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expenses: approvedItems }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'خطا در ذخیره هزینه‌ها');
+        }
+        created = (data.created ?? []) as ExpenseRecord[];
+      } catch (err) {
+        if (err instanceof TypeError) {
+          const nowIso = new Date().toISOString();
+          created = approvedItems.map((item, idx) => ({
+            ...item,
+            id: `local-${Date.now()}-${idx}`,
+            createdAt: nowIso,
+            approvedAt: nowIso,
+          }));
+        } else {
+          throw err;
+        }
+      }
+
+      setLedger((prev) => {
+        const next = { ...prev, expenses: [...created, ...prev.expenses] };
+        saveCache(next);
+        return next;
+      });
+      setPendingDrafts(null);
+      setPreviewPages([]);
+      setLedgerCategoryFilter('all');
+      setActiveTab('ledger');
+      showToast(`${toPersianDigits(created.length)} سند هزینه با موفقیت تایید و ثبت شد.`);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'خطا در ثبت نهایی');
+    } finally {
+      setIsSavingBatch(false);
+    }
+  };
+
+  const handleUpdateExpense = async (id: string, patch: Partial<ExpenseFields>) => {
+    try {
+      const res = await fetch(`/api/expenses/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const updated = data.expense as ExpenseRecord;
+        setLedger((prev) => {
+          const next = {
+            ...prev,
+            expenses: prev.expenses.map((e) => (e.id === updated.id ? updated : e)),
+          };
+          saveCache(next);
+          return next;
+        });
+        setSelectedExpense(updated);
+        showToast('اطلاعات سند بروزرسانی شد.');
+      }
+    } catch (err) {
+      if (err instanceof TypeError) {
+        setLedger((prev) => {
+          const nextExpenses = prev.expenses.map((e) =>
+            e.id === id ? { ...e, ...patch, id: e.id } : e
+          );
+          const next = { ...prev, expenses: nextExpenses };
+          saveCache(next);
+          const updated = nextExpenses.find((e) => e.id === id) ?? null;
+          setSelectedExpense(updated);
+          return next;
+        });
+        showToast('اطلاعات سند به صورت محلی بروزرسانی شد.');
+      }
+    }
+  };
+
+  const handleTogglePaid = async (expense: ExpenseRecord) => {
+    const nextStatus = expense.paymentStatus === 'paid' ? 'pending' : 'paid';
+    const nextTranches = expense.paymentTranches?.map((tr) => ({
+      ...tr,
+      status: nextStatus === 'paid' ? ('paid' as const) : ('pending' as const),
+    }));
+    await handleUpdateExpense(expense.id, {
+      paymentStatus: nextStatus,
+      ...(nextTranches ? { paymentTranches: nextTranches } : {}),
+    });
+  };
+
+  const handleDeleteExpense = async (id: string) => {
+    try {
+      const res = await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setLedger((prev) => {
+          const next = {
+            ...prev,
+            expenses: prev.expenses.filter((e) => e.id !== id),
+          };
+          saveCache(next);
+          return next;
+        });
+        setSelectedExpense(null);
+        showToast('سند هزینه حذف شد.');
+      }
+    } catch (err) {
+      if (err instanceof TypeError) {
+        setLedger((prev) => {
+          const next = {
+            ...prev,
+            expenses: prev.expenses.filter((e) => e.id !== id),
+          };
+          saveCache(next);
+          return next;
+        });
+        setSelectedExpense(null);
+        showToast('سند هزینه به صورت محلی حذف شد.');
+      }
+    }
+  };
+
+  const handleSaveSettings = async (
+    budgets: CategoryBudget[],
+    rates: ExchangeRates,
+    aiConfig: AiConfig
+  ) => {
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ budgets, rates, aiConfig }),
+      });
+      if (res.ok) {
+        const updated = (await res.json()) as LedgerData & { aiStatus?: AiProviderStatus };
+        const nextLedger: LedgerData = {
+          expenses: updated.expenses,
+          budgets: updated.budgets,
+          rates: updated.rates,
+          aiConfig: updated.aiConfig,
+        };
+        setLedger(nextLedger);
+        saveCache(nextLedger);
+        if (updated.aiStatus) {
+          setAiStatus(updated.aiStatus);
+        }
+        showToast('تنظیمات هوش مصنوعی، بودجه‌ها و نرخ ارز ذخیره شدند.');
+      }
+    } catch (err) {
+      if (err instanceof TypeError) {
+        setLedger((prev) => {
+          const next = { ...prev, budgets, rates, aiConfig };
+          saveCache(next);
+          return next;
+        });
+        showToast('تنظیمات به صورت محلی ذخیره شدند.');
+      }
+    }
+  };
+
+  const handleImportJson = async (
+    data: unknown,
+    mode: JsonImportMode
+  ): Promise<JsonImportStats> => {
+    try {
+      const res = await fetch('/api/ledger/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data, mode }),
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || 'خطا در ورود فایل JSON');
+      }
+      const nextLedger = payload.ledger as LedgerData;
+      const stats = payload.stats as JsonImportStats;
+      setLedger(nextLedger);
+      saveCache(nextLedger);
+      setSelectedExpense(null);
+      showToast(
+        mode === 'replace'
+          ? `${toPersianDigits(stats.total)} سند با موفقیت جایگزین شد.`
+          : `${toPersianDigits(stats.added)} سند جدید اضافه و ${toPersianDigits(stats.updated)} سند بروزرسانی شد.`
+      );
+      return stats;
+    } catch (err) {
+      if (err instanceof TypeError) {
+        const validated = parseAndValidateLedgerImport(data);
+        const { next, stats } = mergeLedgerData(ledger, validated, mode);
+        setLedger(next);
+        saveCache(next);
+        setSelectedExpense(null);
+        showToast(
+          mode === 'replace'
+            ? `${toPersianDigits(stats.total)} سند به صورت محلی جایگزین شد.`
+            : `${toPersianDigits(stats.added)} سند جدید اضافه و ${toPersianDigits(stats.updated)} سند بروزرسانی شد.`
+        );
+        return stats;
+      }
+      throw err;
+    }
+  };
+
+  const handleClearLedger = async (scope: 'samples' | 'all'): Promise<number> => {
+    try {
+      const res = await fetch('/api/ledger/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope }),
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || 'خطا در پاکسازی اسناد');
+      }
+      const nextLedger = payload.ledger as LedgerData;
+      const removedCount = Number(payload.removedCount) || 0;
+      setLedger(nextLedger);
+      saveCache(nextLedger);
+      setSelectedExpense((prev) =>
+        prev && nextLedger.expenses.some((e) => e.id === prev.id) ? prev : null
+      );
+      showToast(
+        scope === 'all'
+          ? `همه ${toPersianDigits(removedCount)} سند از دفتر پاکسازی شدند.`
+          : `${toPersianDigits(removedCount)} سند نمونه پاکسازی شد؛ برنامه آماده ثبت اطلاعات واقعی است.`
+      );
+      return removedCount;
+    } catch (err) {
+      if (err instanceof TypeError) {
+        const { next, removedCount } = clearLedgerExpenses(ledger, scope);
+        setLedger(next);
+        saveCache(next);
+        setSelectedExpense((prev) =>
+          prev && next.expenses.some((e) => e.id === prev.id) ? prev : null
+        );
+        showToast(
+          scope === 'all'
+            ? `همه ${toPersianDigits(removedCount)} سند به صورت محلی پاکسازی شدند.`
+            : `${toPersianDigits(removedCount)} سند نمونه به صورت محلی پاکسازی شد.`
+        );
+        return removedCount;
+      }
+      throw err;
+    }
+  };
+
+  const navigateTab = (tab: ActiveTab) => {
+    if (tab !== 'capture') {
+      setPendingDrafts(null);
+      setPreviewPages([]);
+      setSaveError(null);
+    }
+    setActiveTab(tab);
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+      {/* Desktop Top Navigation (Strict 3-zone contract) */}
+      <header className="hidden md:flex sticky top-0 z-30 h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 px-6 lg:px-10 items-center justify-between gap-8">
+        <a
+          href="#overview"
+          onClick={(e) => {
+            e.preventDefault();
+            navigateTab('overview');
+          }}
+          className="text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
+        >
+          حساب‌یار
+        </a>
+
+        <nav aria-label="منوی اصلی" className="flex items-center gap-7 text-sm font-medium">
+          <button
+            type="button"
+            onClick={() => navigateTab('overview')}
+            className={`py-5 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'overview'
+                ? 'border-teal-700 text-teal-800 font-semibold'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            نمای کلی
+          </button>
+          <button
+            type="button"
+            onClick={() => navigateTab('capture')}
+            className={`py-5 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'capture'
+                ? 'border-teal-700 text-teal-800 font-semibold'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            ثبت سند
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setLedgerCategoryFilter('all');
+              navigateTab('ledger');
+            }}
+            className={`py-5 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'ledger'
+                ? 'border-teal-700 text-teal-800 font-semibold'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            دفتر هزینه‌ها
+          </button>
+          <button
+            type="button"
+            onClick={() => navigateTab('settings')}
+            className={`py-5 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'settings'
+                ? 'border-teal-700 text-teal-800 font-semibold'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            بودجه و تنظیمات
+          </button>
+        </nav>
+
+        <div className="shrink-0">
+          <button
+            type="button"
+            onClick={() => navigateTab('capture')}
+            className="inline-flex items-center gap-2 min-h-[40px] px-4 py-2 rounded-xl bg-teal-700 text-white text-xs font-semibold hover:bg-teal-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>ثبت هزینه جدید</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Mobile Compact Sticky Top Bar (56px) */}
+      <header className="md:hidden sticky top-0 z-30 h-14 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 flex items-center justify-between gap-3">
+        <span className="text-base font-bold text-slate-900 truncate">حساب‌یار</span>
+        <PWAInstallButton compact />
+      </header>
+
+      {/* Toast Confirmation */}
+      {toastMessage && (
+        <div
+          role="status"
+          className="fixed top-16 md:top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white shadow-lg"
+        >
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Main Content Area */}
+      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-6 pb-24 md:pb-10">
+        {isLoading ? (
+          <div className="space-y-4">
+            <div className="h-8 w-56 rounded-lg bg-slate-200 animate-pulse" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="h-28 rounded-2xl bg-white border border-slate-200 animate-pulse" />
+              ))}
+            </div>
+            <div className="h-72 rounded-2xl bg-white border border-slate-200 animate-pulse" />
+          </div>
+        ) : loadError ? (
+          <div className="rounded-2xl bg-white border border-red-200 p-6 text-center max-w-md mx-auto mt-8">
+            <p className="text-sm font-semibold text-red-700">{loadError}</p>
+            <button
+              type="button"
+              onClick={loadLedger}
+              className="mt-4 min-h-[40px] px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold cursor-pointer"
+            >
+              تلاش مجدد
+            </button>
+          </div>
+        ) : (
+          <>
+            {activeTab === 'overview' && (
+              <OverviewDashboard
+                expenses={ledger.expenses}
+                budgets={ledger.budgets}
+                rates={ledger.rates}
+                displayUnit={displayUnit}
+                onChangeDisplayUnit={handleChangeDisplayUnit}
+                onNavigateCapture={() => navigateTab('capture')}
+                onOpenLedgerWithCategory={(cat) => {
+                  setLedgerCategoryFilter(cat);
+                  navigateTab('ledger');
+                }}
+                onSelectExpense={(exp) => {
+                  setSelectedExpense(exp);
+                  navigateTab('ledger');
+                }}
+              />
+            )}
+
+            {activeTab === 'capture' && !pendingDrafts && (
+              <CaptureWorkspace
+                rates={ledger.rates}
+                aiConfig={ledger.aiConfig ?? { provider: 'gemini', model: 'gemini-4-hydrogen' }}
+                aiStatus={aiStatus}
+                localApiKeys={localApiKeys}
+                onSaveLocalApiKey={handleSaveLocalApiKey}
+                onRemoveLocalApiKey={handleRemoveLocalApiKey}
+                onOpenSettings={() => navigateTab('settings')}
+                onDraftsReady={(drafts, pages) => {
+                  setPendingDrafts(drafts);
+                  setPreviewPages(pages);
+                  setSaveError(null);
+                }}
+              />
+            )}
+
+            {activeTab === 'capture' && pendingDrafts && (
+              <DraftReviewPanel
+                drafts={pendingDrafts}
+                previewPages={previewPages}
+                existingExpenses={ledger.expenses}
+                rates={ledger.rates}
+                isSaving={isSavingBatch}
+                saveError={saveError}
+                onUpdateDrafts={setPendingDrafts}
+                onClearPreviewPages={() => {
+                  setPreviewPages([]);
+                  setPendingDrafts((prev) =>
+                    prev
+                      ? prev.map((d) => ({ ...d, sourcePreviewUrl: undefined }))
+                      : null
+                  );
+                }}
+                onApprove={handleApproveBatch}
+                onCancel={() => {
+                  setPendingDrafts(null);
+                  setPreviewPages([]);
+                  setSaveError(null);
+                }}
+              />
+            )}
+
+            {activeTab === 'ledger' && (
+              <ExpenseLedger
+                expenses={ledger.expenses}
+                budgets={ledger.budgets}
+                rates={ledger.rates}
+                displayUnit={displayUnit}
+                onChangeDisplayUnit={handleChangeDisplayUnit}
+                initialCategory={ledgerCategoryFilter}
+                selectedExpense={selectedExpense}
+                onSelectExpense={setSelectedExpense}
+                onTogglePaid={handleTogglePaid}
+                onUpdateExpense={handleUpdateExpense}
+                onDeleteExpense={handleDeleteExpense}
+                onImportJson={handleImportJson}
+                onClearSamples={() => handleClearLedger('samples')}
+              />
+            )}
+
+            {activeTab === 'settings' && (
+              <SettingsBudgets
+                budgets={ledger.budgets}
+                rates={ledger.rates}
+                expenses={ledger.expenses}
+                aiConfig={ledger.aiConfig ?? { provider: 'gemini', model: 'gemini-4-hydrogen' }}
+                aiStatus={aiStatus}
+                localApiKeys={localApiKeys}
+                onSaveLocalApiKey={handleSaveLocalApiKey}
+                onRemoveLocalApiKey={handleRemoveLocalApiKey}
+                onClearLedger={handleClearLedger}
+                onSaveSettings={handleSaveSettings}
+                onImportJson={handleImportJson}
+              />
+            )}
+          </>
+        )}
+      </main>
+
+      {/* Mobile Fixed Bottom Thumb-Zone Tab Bar (64px) */}
+      <nav
+        aria-label="ناوبری موبایل"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 grid grid-cols-4 h-16 pb-safe"
+      >
+        <button
+          type="button"
+          onClick={() => navigateTab('overview')}
+          className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium cursor-pointer ${
+            activeTab === 'overview' ? 'text-teal-700 font-bold' : 'text-slate-500'
+          }`}
+        >
+          <LayoutDashboard className="w-5 h-5" />
+          <span>داشبورد</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigateTab('capture')}
+          className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium cursor-pointer ${
+            activeTab === 'capture' ? 'text-teal-700 font-bold' : 'text-slate-500'
+          }`}
+        >
+          <Camera className="w-5 h-5" />
+          <span>ثبت سند</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setLedgerCategoryFilter('all');
+            navigateTab('ledger');
+          }}
+          className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium cursor-pointer ${
+            activeTab === 'ledger' ? 'text-teal-700 font-bold' : 'text-slate-500'
+          }`}
+        >
+          <ListOrdered className="w-5 h-5" />
+          <span>هزینه‌ها</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigateTab('settings')}
+          className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium cursor-pointer ${
+            activeTab === 'settings' ? 'text-teal-700 font-bold' : 'text-slate-500'
+          }`}
+        >
+          <Settings className="w-5 h-5" />
+          <span>تنظیمات</span>
+        </button>
+      </nav>
+
+      <OfflineIndicator />
+    </div>
+  );
+}
