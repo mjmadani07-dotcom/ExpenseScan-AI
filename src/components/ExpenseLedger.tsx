@@ -1,3 +1,4 @@
+import { businessDateIso } from '../utils/jalali';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeftRight,
@@ -50,6 +51,8 @@ import {
   filterExpenses,
   formatCompactCurrency,
   formatDisplayAmount,
+  toEntryAmount,
+  fromEntryAmount,
   getCategoryLabel,
   getUniquePurchasers,
   normalizePurchaserName,
@@ -206,7 +209,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
     setIsExportingExcel(true);
     try {
       const { downloadExpensesExcel } = await import('../utils/excelExport');
-      const jalaliSlug = formatJalaliDate(new Date().toISOString().slice(0, 10)).replace(/\//g, '-');
+      const jalaliSlug = formatJalaliDate(businessDateIso()).replace(/\//g, '-');
       downloadExpensesExcel(
         filtered,
         budgets,
@@ -647,7 +650,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      setFilters((f) => ({ ...f, dateFrom: new Date().toISOString().slice(0, 10) }))
+                      setFilters((f) => ({ ...f, dateFrom: businessDateIso() }))
                     }
                     className="w-full min-h-[42px] rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 text-xs font-medium text-slate-600 hover:border-teal-500 hover:text-teal-800 cursor-pointer"
                   >
@@ -675,7 +678,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      setFilters((f) => ({ ...f, dateTo: new Date().toISOString().slice(0, 10) }))
+                      setFilters((f) => ({ ...f, dateTo: businessDateIso() }))
                     }
                     className="w-full min-h-[42px] rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 text-xs font-medium text-slate-600 hover:border-teal-500 hover:text-teal-800 cursor-pointer"
                   >
@@ -1104,7 +1107,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                         htmlFor="detail-historical-rate"
                         className="text-xs font-semibold text-slate-700"
                       >
-                        نرخ تسعیر ثبت‌شده این سند (تومان):
+                        نرخ تسعیر ثبت‌شده این سند ({CURRENCY_LABELS[displayUnit]}):
                       </label>
                       <div className="flex items-center gap-1.5">
                         <input
@@ -1112,8 +1115,8 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                           type="number"
                           min={1}
                           step={100}
-                          value={rateDraft}
-                          onChange={(e) => setRateDraft(Number(e.target.value) || 0)}
+                          value={toEntryAmount(rateDraft, 'IRT', displayUnit)}
+                          onChange={(e) => setRateDraft(fromEntryAmount(Number(e.target.value) || 0, 'IRT', displayUnit))}
                           className="w-28 min-h-[36px] rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
                         />
                         <button

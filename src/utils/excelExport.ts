@@ -1,3 +1,4 @@
+import { businessDateIso } from './jalali';
 import XLSX from 'xlsx-js-style';
 import type {
   CategoryBudget,
@@ -192,7 +193,7 @@ export function buildExpenseWorkbook(
   wb.Workbook = { Views: [{ RTL: true }] };
 
   const unitLabel = displayUnit === 'IRR' ? 'ریال' : 'تومان';
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = businessDateIso();
   const todayLong = formatJalaliLong(todayIso);
 
   // =========================================================================

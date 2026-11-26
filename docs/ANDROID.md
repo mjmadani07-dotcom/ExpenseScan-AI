@@ -21,3 +21,6 @@ Use a dedicated Android CI workflow after native project exists. Test/lint/build
 ## Current baseline
 
 The external review reported passing type checking/tests/build; not independently reproduced at planning time. CI is intended to verify branch changes. The npm/esbuild conflict is evidenced by direct esbuild ^0.25 versus Vite peer ^0.27 or ^0.28; remove the unnecessary direct dependency and align lock to the existing tsx transitive resolution. The existing web server still contains known security/data issues and is for local development only. No native project or APK at phase 0.
+
+## Phase 1 changes
+Global display unit is independent of source currency; domestic amount inputs convert reversibly, foreign amount entry stays explicitly denominated in the original currency with equivalent display. Tehran business date is default; event timestamps stay UTC. Added shared validation for new/edited expenses, empty operational store and fail-closed legacy JSON read. Import validation and full durable offline storage still require further work. CI and device UX validation are required.

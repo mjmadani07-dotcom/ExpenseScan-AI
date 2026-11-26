@@ -1,3 +1,4 @@
+import { ExpenseValidationError } from './src/utils/expenseValidation.ts';
 import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
@@ -132,17 +133,11 @@ async function startServer() {
         res.status(400).json({ error: 'لیست هزینه‌های تاییدشده خالی است.' });
         return;
       }
-      for (const item of body.expenses) {
-        if (!item.title || !item.vendor || !Number.isFinite(Number(item.amount))) {
-          res.status(400).json({ error: 'عنوان، فروشنده و مبلغ معتبر برای همه ردیف‌ها الزامی است.' });
-          return;
-        }
-      }
       const created = addExpensesBatch(body.expenses);
       res.status(201).json({ created });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'خطا در ثبت هزینه‌ها';
-      res.status(500).json({ error: message });
+      res.status(err instanceof ExpenseValidationError ? 400 : 500).json({ error: message });
     }
   });
 
@@ -156,7 +151,7 @@ async function startServer() {
       res.json({ expense: updated });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'خطا در بروزرسانی سند';
-      res.status(500).json({ error: message });
+      res.status(err instanceof ExpenseValidationError ? 400 : 500).json({ error: message });
     }
   });
 

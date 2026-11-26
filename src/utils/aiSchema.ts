@@ -1,3 +1,4 @@
+import { parseIsoDate } from './jalali';
 import type {
   CategoryDefinition,
   CostCenter,
@@ -167,7 +168,7 @@ export function normalizeExtractedExpenseList(
       }));
 
     const dateStr =
-      typeof item.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.date)
+      typeof item.date === 'string' && parseIsoDate(item.date)
         ? item.date
         : todayIso;
 
@@ -184,7 +185,7 @@ export function normalizeExtractedExpenseList(
         method: clampAiEnum(tr.method, VALID_PAYMENT_METHODS, 'bank_transfer'),
         status: clampAiEnum(tr.status, VALID_TRANCHE_STATUSES, 'pending'),
         date:
-          typeof tr.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(tr.date)
+          typeof tr.date === 'string' && parseIsoDate(tr.date)
             ? tr.date
             : undefined,
         referenceCode: tr.referenceCode ? String(tr.referenceCode) : undefined,
@@ -233,7 +234,7 @@ export function normalizeExtractedExpenseList(
       paymentStatus,
       paymentTranches: finalTranches,
       dueDate:
-        typeof item.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.dueDate)
+        typeof item.dueDate === 'string' && parseIsoDate(item.dueDate)
           ? item.dueDate
           : undefined,
       purchaser:

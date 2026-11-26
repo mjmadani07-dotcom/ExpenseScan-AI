@@ -279,7 +279,7 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
         {isForeign && (
           <div className="sm:col-span-2">
             <label htmlFor={`edit-rate-${expense.id}`} className="block text-xs font-semibold text-slate-700 mb-1">
-              نرخ تسعیر ثبت‌شده این سند (تومان) *
+              نرخ تسعیر ثبت‌شده این سند ({CURRENCY_LABELS[displayUnit]}) *
             </label>
             <input
               id={`edit-rate-${expense.id}`}
@@ -287,8 +287,8 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
               min={1}
               step={100}
               required
-              value={effectiveRate ?? 0}
-              onChange={(e) => setExchangeRateToToman(Number(e.target.value) || 0)}
+              value={toEntryAmount(effectiveRate ?? 0, 'IRT', displayUnit)}
+              onChange={(e) => setExchangeRateToToman(fromEntryAmount(Number(e.target.value) || 0, 'IRT', displayUnit))}
               className="w-full min-h-[40px] rounded-xl border border-teal-300 bg-teal-50/40 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
             />
           </div>

@@ -1,3 +1,4 @@
+import { businessDateIso } from '../utils/jalali';
 import React from 'react';
 import {
   JALALI_MONTHS,
@@ -28,13 +29,13 @@ export const JalaliDateInput: React.FC<JalaliDateInputProps> = ({
   allowClear = false,
   onClear,
 }) => {
-  const { jy, jm, jd } = isoDateToJalali(value || new Date().toISOString().slice(0, 10));
+  const { jy, jm, jd } = isoDateToJalali(value || businessDateIso());
   const clampedYear = Math.min(Math.max(jy, YEAR_START), YEAR_END);
   const maxDay = getJalaliMonthLength(clampedYear, jm);
   const clampedDay = Math.min(Math.max(jd, 1), maxDay);
 
   const handleSetToday = () => {
-    onChange(new Date().toISOString().slice(0, 10));
+    onChange(businessDateIso());
   };
 
   return (

@@ -1,3 +1,4 @@
+import { businessDateIso } from './jalali';
 import type { AiProviderId, CategoryDefinition, ExpenseFields } from '../types/expense';
 import {
   buildExtractionSystemInstruction,
@@ -48,7 +49,7 @@ export async function extractExpensesDirectlyFromBrowser(
     throw new Error('کلید امنیتی برای این سرویس وارد نشده است.');
   }
 
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = businessDateIso();
   const systemInstruction = buildExtractionSystemInstruction(todayIso, true, params.categories);
   const contextHint = params.fileName ? `نام فایل ورودی: ${params.fileName}\n` : '';
   const textPrompt = params.text?.trim()

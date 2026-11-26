@@ -1,3 +1,5 @@
+import { businessDateIso, addCalendarDays, parseIsoDate, getJalaliMonthLength } from './jalali';
+import { validateExpenseFields, validateExpensePatch } from './expenseValidation';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -834,4 +836,25 @@ test('one global unit preserves the original currency and individual rials', () 
   assert.equal(getEntryCurrency('USD', 'IRT'), 'USD');
   assert.equal(fromEntryAmount(123.4, 'IRR', 'IRT'), 1234);
   assert.equal(fromEntryAmount(1234, 'IRT', 'IRR'), 123.4);
+});
+
+test('Tehran business day and Gregorian date validation', () => {
+  assert.equal(businessDateIso(new Date('2026-11-26T21:00:00Z')), '2026-11-27');
+  assert.equal(businessDateIso(new Date('2026-11-26T20:00:00Z')), '2026-11-26');
+  assert.equal(addCalendarDays('2026-11-27', 1), '2026-11-28');
+  assert.equal(parseIsoDate('2026-02-30'), null);
+  assert.ok(parseIsoDate('2024-02-29'));
+  assert.equal(getJalaliMonthLength(1403,12),30);
+  assert.equal(getJalaliMonthLength(1404,12),29);
+});
+test('strict expense validation rejects invalid patch and preserves identity', () => {
+  const current=SAMPLE_EXPENSES[0];
+  const {id,createdAt,approvedAt,...fields}=current;
+  assert.equal(validateExpenseFields(fields,DEFAULT_CATEGORIES,SAMPLE_RATES).amount,current.amount);
+  for(const patch of [{amount:'abc'},{amount:-1},{currency:'XYZ'},{date:'2026-02-30'},{extra:true},{id:'bad'},{taxAmount:-1}]) {
+    assert.throws(()=>validateExpensePatch(current,patch,DEFAULT_CATEGORIES,SAMPLE_RATES), /نامعتبر/);
+  }
+  assert.equal(validateExpensePatch(current,{amount:12345},DEFAULT_CATEGORIES,SAMPLE_RATES).id,id);
+  assert.throws(()=>validateExpensePatch(current,{paymentTranches:[{id:'a',title:'قسط',amount:current.amount+1,method:'check',status:'pending'}]},DEFAULT_CATEGORIES,SAMPLE_RATES),/اقساط/);
+  assert.throws(()=>parseAndValidateLedgerImport([{...current,currency:'XYZ'}]),/واحد پول/);
 });

@@ -494,7 +494,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                         htmlFor={`rate-${draft.tempId}`}
                         className="block text-xs font-semibold text-slate-700 mb-1.5"
                       >
-                        نرخ تسعیر این سند (تومان) *
+                        نرخ تسعیر این سند ({CURRENCY_LABELS[displayUnit]}) *
                       </label>
                       <input
                         id={`rate-${draft.tempId}`}
@@ -502,10 +502,10 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                         min={1}
                         step={100}
                         required
-                        value={effectiveRate ?? 0}
+                        value={toEntryAmount(effectiveRate ?? 0, 'IRT', displayUnit)}
                         onChange={(e) =>
                           updateDraft(draft.tempId, {
-                            exchangeRateToToman: Number(e.target.value) || 0,
+                            exchangeRateToToman: fromEntryAmount(Number(e.target.value) || 0, 'IRT', displayUnit),
                           })
                         }
                         className="w-full min-h-[42px] rounded-xl border border-teal-300 bg-teal-50/40 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"

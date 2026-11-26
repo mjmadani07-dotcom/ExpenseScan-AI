@@ -22,7 +22,7 @@ import type {
   SourceType,
   TimeframeFilter,
 } from '../types/expense';
-import { formatJalaliDate, formatJalaliMonthLabel, getJalaliMonthKey, toPersianDigits } from './jalali';
+import { businessDateIso, parseIsoDate, formatJalaliDate, formatJalaliMonthLabel, getJalaliMonthKey, toPersianDigits } from './jalali';
 
 export const CATEGORY_LABELS: Record<DefaultExpenseCategory, string> = {
   infrastructure: 'زیرساخت و فناوری',
@@ -531,14 +531,18 @@ export function formatCompactToman(amountIRT: number): string {
 
 export function getTimeframeCutoffIso(timeframe: TimeframeFilter, referenceDate: Date): string | null {
   if (timeframe === 'all') return null;
-  const d = new Date(referenceDate.getTime());
+  const d = new Date(`${businessDateIso(referenceDate)}T00:00:00Z`);
   const monthsMap: Record<Exclude<TimeframeFilter, 'all'>, number> = {
     '1m': 1,
     '3m': 3,
     '6m': 6,
     '12m': 12,
   };
-  d.setMonth(d.getMonth() - monthsMap[timeframe]);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() - monthsMap[timeframe]);
+  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, last));
   return d.toISOString().slice(0, 10);
 }
 
@@ -1043,7 +1047,7 @@ export function parseAndValidateLedgerImport(raw: unknown): ValidatedLedgerImpor
   ]);
 
   const nowIso = new Date().toISOString();
-  const todayIso = nowIso.slice(0, 10);
+  const todayIso = businessDateIso();
 
   const expenses: ExpenseRecord[] = rawExpenses.map((entry, index) => {
     if (!entry || typeof entry !== 'object') {
@@ -1052,20 +1056,22 @@ export function parseAndValidateLedgerImport(raw: unknown): ValidatedLedgerImpor
     const rec = entry as Record<string, unknown>;
     const title = typeof rec.title === 'string' ? rec.title.trim() : '';
     const vendor = typeof rec.vendor === 'string' ? rec.vendor.trim() : '';
-    const amount = Number(rec.amount);
+    const amount = rec.amount;
 
     if (!title || !vendor) {
       throw new Error(
         `سند ردیف ${toPersianDigits(index + 1)} فاقد عنوان یا نام فروشنده معتبر است.`
       );
     }
-    if (!Number.isFinite(amount) || amount < 0) {
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
       throw new Error(
         `مبلغ سند «${title}» (ردیف ${toPersianDigits(index + 1)}) معتبر نیست.`
       );
     }
 
-    const currency = clampImportEnum(rec.currency, VALID_IMPORT_CURRENCIES, 'IRT');
+    if (typeof rec.currency !== 'string' || !VALID_IMPORT_CURRENCIES.includes(rec.currency as Currency)) throw new Error(`واحد پول سند «${title}» معتبر نیست.`);
+    if (typeof rec.date !== 'string' || !parseIsoDate(rec.date)) throw new Error(`تاریخ سند «${title}» معتبر نیست.`);
+    const currency = rec.currency as Currency;
     const dateStr =
       typeof rec.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rec.date)
         ? rec.date

@@ -1,3 +1,4 @@
+import { businessDateIso } from '../utils/jalali';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -344,7 +345,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   };
 
   const handleCreateManualDraft = () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = businessDateIso();
     const defaultCategory = activeCategories.some((c) => c.id === 'operations')
       ? 'operations'
       : activeCategories[0]?.id ?? 'other';

@@ -1,3 +1,4 @@
+import { businessDateIso } from '../src/utils/jalali.ts';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import type {
   AiConfig,
@@ -413,7 +414,7 @@ async function extractWithOpenAiCompatible(params: {
 export async function extractStructuredExpenses(
   payload: ExtractRequestPayload
 ): Promise<Omit<ExpenseFields, 'sourceType' | 'sourceFileName' | 'sourcePreviewUrl' | 'pageCount'>[]> {
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = businessDateIso();
   const provider: AiProviderId = payload.provider ?? 'gemini';
   const catalogEntry =
     AI_PROVIDER_CATALOG.find((p) => p.id === provider) ?? AI_PROVIDER_CATALOG[0];

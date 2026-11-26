@@ -156,19 +156,32 @@ export function jalaliToIsoDate(jy: number, jm: number, jd: number): string {
 export function isoDateToJalali(isoDate: string): JalaliDate {
   const parsed = parseIsoDate(isoDate);
   if (!parsed) {
-    const now = new Date();
-    return gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate());
+    const today = parseIsoDate(businessDateIso())!;
+    return gregorianToJalali(today.year, today.month, today.day);
   }
   return gregorianToJalali(parsed.year, parsed.month, parsed.day);
 }
 
+// Business dates in Iran; UTC is retained only for event timestamps.
+export function businessDateIso(at = new Date(), timeZone = 'Asia/Tehran'): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, calendar: 'gregory', numberingSystem: 'latn', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(at);
+  const part = (type: string) => parts.find(p => p.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+export function addCalendarDays(isoDate: string, days: number): string {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
 export function parseIsoDate(isoDate: string): { year: number; month: number; day: number } | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(isoDate.trim());
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
   if (!match) return null;
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const date = new Date(`${match[1]}-${match[2]}-${match[3]}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime()) || date.getUTCFullYear() !== year || date.getUTCMonth() + 1 !== month || date.getUTCDate() !== day) return null;
   return { year, month, day };
 }
 

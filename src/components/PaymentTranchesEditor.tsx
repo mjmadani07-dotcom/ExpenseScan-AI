@@ -1,3 +1,4 @@
+import { addCalendarDays, businessDateIso } from '../utils/jalali';
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp, Plus, Split, Trash2 } from 'lucide-react';
 import type {
@@ -41,9 +42,7 @@ const TRANCHE_STATUS_LABELS: Record<PaymentTrancheStatus, string> = {
 };
 
 function addDaysIso(isoDate: string, days: number): string {
-  const base = isoDate && /^\d{4}-\d{2}-\d{2}$/.test(isoDate) ? new Date(`${isoDate}T00:00:00`) : new Date();
-  base.setDate(base.getDate() + days);
-  return base.toISOString().slice(0, 10);
+  return addCalendarDays(isoDate || businessDateIso(), days);
 }
 
 export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
