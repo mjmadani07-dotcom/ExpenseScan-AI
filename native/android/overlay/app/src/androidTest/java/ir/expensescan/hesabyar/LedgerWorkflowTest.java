@@ -160,7 +160,10 @@ public class LedgerWorkflowTest {
             text(app,"گذرواژه نادرست است");record(app,null,0);
             field(app,passwordSelector,PASSWORD);
             file(app,"input[type=file][accept*='.esbackup']","backup.esbackup2","application/octet-stream",encoded);
-            text(app,"فهرست رمزگذاری‌شده معتبر");click(app,"تأیید بازیابی");confirm();
+            text(app,"فهرست رمزگذاری‌شده معتبر");
+            // Return from evaluateJavascript before the synchronous JS confirmation blocks the WebView.
+            String restore=buttons("تأیید بازیابی");waitFor(app,restore,"Restore control unavailable");
+            eval(app,"(()=>{const b="+restore+";setTimeout(()=>b.click(),100);return true})()");confirm();
             text(app,"بازیابی انجام شد.");JSONObject restored=record(app,EDITED,23456);
             assertEquals(id,restored.getString("id"));assertEquals(attachment,restored.getString("attachmentId"));
             click(app,"قفل فوری برنامه");text(app,"حساب‌یار قفل است");
