@@ -2,9 +2,9 @@ name: Android baseline checks
 
 on:
   push:
-    branches: [android]
+    branches: [android, android-multi-ledger]
   pull_request:
-    branches: [android]
+    branches: [android, android-multi-ledger]
   workflow_dispatch:
 
 permissions:

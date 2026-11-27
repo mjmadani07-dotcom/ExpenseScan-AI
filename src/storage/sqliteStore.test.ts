@@ -407,3 +407,75 @@ test('disposing local repository rejects queued and in-flight writes before comm
 test('PDF report uses shared historical FX and payment totals in the selected unit',async()=>{
  const {buildPdfReport}=await import('../utils/pdfReport');const {emptyLedger}=await import('./ledgerDomain');const base=emptyLedger();const d='2026-11-27T00:00:00Z';const records=[{...expense,id:'r',createdAt:d,approvedAt:d,amount:12345,currency:'IRT' as const,paymentStatus:'paid' as const}];const report=buildPdfReport(records,base.rates,'IRR',base.categories??[],'گزارش','فیلتر');assert.equal(report.rows.length,1);assert.equal(report.total,report.paid);assert.equal(report.rows[0][3],report.total);assert.match(report.total,/۱۲۳,۴۵۰/);assert.match(report.remaining,/۰ ریال/);
 });
+
+test('multi-ledger migration keeps the original ledger, draft and recovery identities',async()=>{
+ const {migrateSingleLedger,DEFAULT_LEDGER_ID,validateMultiLedger}=await import('./multiLedger');
+ const {emptyLedger}=await import('./ledgerDomain');
+ const d='2026-11-27T00:00:00Z',record={...expense,id:'old-doc',createdAt:d,approvedAt:d};
+ const ledger={...emptyLedger(),expenses:[record]};
+ const draft={id:'old-draft',drafts:[{...expense,tempId:'old-temp',selected:true}],previewPages:[]};
+ const original={ledger,draft,recoveries:[{id:'old-recovery',createdAt:d,ledger,draft}],lastApproval:{id:'old-approval',records:[record]}};
+ const moved=migrateSingleLedger(original,d);
+ assert.equal(moved.workspaces[0].profile.id,DEFAULT_LEDGER_ID);
+ assert.equal(moved.workspaces[0].state.ledger.expenses[0].id,'old-doc');
+ assert.deepEqual(moved.workspaces[0].state.draft,draft);
+ assert.equal(moved.workspaces[0].state.recoveries?.[0].id,'old-recovery');
+ assert.equal(moved.workspaces[0].state.lastApproval?.id,'old-approval');
+ assert.deepEqual(validateMultiLedger(moved),moved);
+});
+test('multi-ledger catalog scopes real repository writes, drafts, budgets, recoveries and clears',async()=>{
+ const {migrateSingleLedger,createLedger,ScopedLedgerStore,changeCatalog,editLedgerProfile,DEFAULT_LEDGER_ID,validateMultiLedger}=await import('./multiLedger');
+ const {emptyLedger}=await import('./ledgerDomain');
+ const d='2026-11-27T00:00:00Z';
+ let state=createLedger(migrateSingleLedger({ledger:emptyLedger(),draft:null},d),'دفتر جم','#123456',d,'jam'),revision=0;
+ const store={initialize:async()=>{},read:async()=>({revision,state:structuredClone(state)}),compareAndSwap:async(expected:number,next:typeof state)=>{if(expected!==revision)return false;state=validateMultiLedger(next);revision++;return true;}};
+ await changeCatalog(store,s=>editLedgerProfile(s,DEFAULT_LEDGER_ID,{name:'دفتر کرج'}));
+ const karaj=new LocalLedgerRepository(new ScopedLedgerStore(store,DEFAULT_LEDGER_ID)),jam=new LocalLedgerRepository(new ScopedLedgerStore(store,'jam'));
+ const [k]=await karaj.add([{...expense,title:'Karaj'}]);
+ const [j]=await jam.add([{...expense,title:'Jam'}]);
+ assert.equal((await karaj.load()).expenses[0].id,k.id);
+ assert.equal((await jam.load()).expenses[0].id,j.id);
+ await assert.rejects(()=>jam.update(k.id,{amount:99}),/یافت نشد/);
+ await assert.rejects(()=>jam.remove(k.id),/یافت نشد/);
+ const draft={id:'jam-draft',drafts:[{...expense,tempId:'x',selected:true}],previewPages:[]};
+ await jam.saveDraft(draft);assert.equal(await karaj.loadDraft(),null);assert.deepEqual(await jam.loadDraft(),draft);
+ await jam.settings([{category:'operations',monthlyLimitIRT:123}],{USD:80000,EUR:90000},{provider:'openai',model:'test'});
+ assert.equal((await jam.load()).budgets[0].monthlyLimitIRT,123);assert.equal((await karaj.load()).budgets.length,0);
+ await jam.createRecovery();await jam.clear('all');
+ assert.equal((await jam.load()).expenses.length,0);assert.equal((await karaj.load()).expenses[0].id,k.id);
+ await jam.restoreRecovery();assert.equal((await jam.load()).expenses[0].id,j.id);
+ assert.equal((await karaj.recoveryList()).length,0);
+ await assert.rejects(()=>changeCatalog(store,s=>editLedgerProfile(s,'jam',{archived:true})),/پیش‌نویس/);
+ await jam.saveDraft(null);
+ await changeCatalog(store,s=>editLedgerProfile(s,'jam',{archived:true}));
+ await assert.rejects(()=>jam.add([expense]),/بایگانی/);
+ await assert.rejects(()=>changeCatalog(store,s=>editLedgerProfile(s,DEFAULT_LEDGER_ID,{archived:true})),/نامعتبر/);
+ assert.throws(()=>createLedger(state,'دفتر كرج','#123456',d,'duplicate'),/نامعتبر/);
+});
+test('multi-ledger CAS rejects stale writes without replacing another ledger',async()=>{
+ const {migrateSingleLedger,createLedger,ScopedLedgerStore,DEFAULT_LEDGER_ID}=await import('./multiLedger');
+ const {emptyLedger}=await import('./ledgerDomain');const d='2026-11-27T00:00:00Z';
+ let state=createLedger(migrateSingleLedger({ledger:emptyLedger(),draft:null},d),'Jam','#123456',d,'jam'),revision=0;
+ const store={initialize:async()=>{},read:async()=>({revision,state:structuredClone(state)}),compareAndSwap:async(expected:number,next:typeof state)=>{if(expected!==revision)return false;state=structuredClone(next);revision++;return true;}};
+ const first=new ScopedLedgerStore(store,DEFAULT_LEDGER_ID),second=new ScopedLedgerStore(store,'jam');
+ const old=await first.read();const repo=new LocalLedgerRepository(second);await repo.add([expense]);
+ assert.equal(await first.compareAndSwap(old.revision,old.state),false);
+ assert.equal((await repo.load()).expenses.length,1);
+});
+test('consolidated reporting selects only requested ledgers and uses per-document FX',async()=>{
+ const {migrateSingleLedger,createLedger,consolidateLedgers,DEFAULT_LEDGER_ID}=await import('./multiLedger');
+ const {emptyLedger}=await import('./ledgerDomain');const {DEFAULT_EXPENSE_FILTERS}=await import('../utils/finance');
+ const d='2026-11-27T00:00:00Z';
+ let root=createLedger(createLedger(migrateSingleLedger({ledger:emptyLedger(),draft:null},d),'Jam','#123456',d,'jam'),'Personal','#654321',d,'personal');
+ const [k,j,p]=root.workspaces;
+ k.state.ledger.expenses=[{...expense,id:'same',createdAt:d,approvedAt:d,currency:'USD',amount:10,exchangeRateToToman:70000}];
+ j.state.ledger.expenses=[{...expense,id:'same',createdAt:d,approvedAt:d,currency:'IRT',amount:250000}];
+ p.state.ledger.expenses=[{...expense,id:'personal',createdAt:d,approvedAt:d,currency:'IRT',amount:999}];
+ const report=consolidateLedgers(root,[DEFAULT_LEDGER_ID,'jam'],{...DEFAULT_EXPENSE_FILTERS,sortBy:'amount_desc'});
+ assert.equal(report.count,2);assert.equal(report.totalIRT,950000);assert.equal(report.paidIRT,950000);assert.equal(report.remainingIRT,0);
+ assert.deepEqual(report.rows.map(x=>x.ledgerId),[DEFAULT_LEDGER_ID,'jam']);
+ assert.deepEqual(report.byLedger.map(x=>x.totalIRT),[700000,250000]);
+ assert.throws(()=>consolidateLedgers(root,['jam','jam']),/تکرار/);
+ assert.throws(()=>consolidateLedgers(root,['missing']),/یافت نشد/);
+ assert.throws(()=>consolidateLedgers(root,[DEFAULT_LEDGER_ID,'jam'],{...DEFAULT_EXPENSE_FILTERS,category:'operations'}),/تفکیک/);
+});
