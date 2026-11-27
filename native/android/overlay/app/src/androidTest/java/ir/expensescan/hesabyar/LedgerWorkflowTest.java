@@ -323,6 +323,12 @@ public class LedgerWorkflowTest {
     private void returnToCatalog(ActivityScenario<MainActivity> app)throws Exception{
         nav(app,"داشبورد");click(app,"تغییر دفتر");text(app,"دفاتر مالی");
     }
+    private byte[] readReportFile(String extension)throws Exception{
+        if(!"pdf".equals(extension)&&!"xlsx".equals(extension))throw new IllegalArgumentException("extension");
+        String path=shell("find /sdcard/Download/HesabYar -maxdepth 1 -type f -name 'hesabyar-consolidated-*."+extension+"' | head -n 1");
+        assertTrue("Report file missing",path.startsWith("/sdcard/Download/HesabYar/hesabyar-consolidated-")&&path.endsWith("."+extension)&&!path.contains("'"));
+        return android.util.Base64.decode(shell("base64 '"+path+"'"),android.util.Base64.DEFAULT);
+    }
     @Test public void multiLedgerCatalogAndScopedCapture()throws Exception{
         unlockDeviceScreen();
         assertEquals("1",shell("settings get global airplane_mode_on"));
@@ -358,7 +364,50 @@ public class LedgerWorkflowTest {
                 }
             }
             assertTrue(foundKaraj&&foundJam);assertEquals(1,karaj);assertEquals(0,jam);
-            returnToCatalog(app);openCatalogLedger(app,"دفتر کرج");nav(app,"هزینه‌ها");text(app,"Karaj E2E");
+            // Add a second actual record to the other workspace.
+            nav(app,"ثبت سند");click(app,"ثبت دستی (آفلاین)");text(app,"بررسی و تایید نهایی پیش‌نویس");
+            field(app,"input[id^='title-']","Jam E2E");field(app,"input[id^='vendor-']","Synthetic vendor");field(app,"input[id^='amount-']","23456");
+            waitFor(app,"document.querySelector('form button[type=submit]:not(:disabled)')","Jam approval unavailable");
+            eval(app,"document.querySelector('form button[type=submit]').click()");
+            waitFor(app,"!document.querySelector('input[id^=\"title-\"]')","Jam approval did not complete");text(app,"Jam E2E");
+            returnToCatalog(app);click(app,"گزارش تلفیقی دفاتر");text(app,"دفاتر گزارش");
+            String karajChoice="document.querySelector('input[type=checkbox][aria-label=\"دفتر کرج\"]')";
+            String jamChoice="document.querySelector('input[type=checkbox][aria-label=\"دفتر جم\"]')";
+            waitFor(app,karajChoice,"Karaj report selector missing");waitFor(app,jamChoice,"Jam report selector missing");
+            assertEquals("0",eval(app,"document.querySelectorAll('input[type=checkbox]:checked').length"));
+            eval(app,"("+karajChoice+").click()");click(app,"تولید گزارش");text(app,"Karaj E2E");
+            waitFor(app,"!document.querySelector('[aria-label=\"نتیجه گزارش\"]').innerText.includes('Jam E2E')","Unselected ledger leaked into report");
+            eval(app,"("+jamChoice+").click()");
+            waitFor(app,"!document.querySelector('[aria-label=\"نتیجه گزارش\"]')","Old report was not invalidated");
+            click(app,"تولید گزارش");text(app,"Jam E2E");text(app,"Karaj E2E");text(app,"۵۸,۰۲۳ تومان");
+            String pdfButton=buttons("خروجی PDF");waitFor(app,pdfButton,"Consolidated PDF unavailable");
+            eval(app,"(()=>{const b="+pdfButton+";setTimeout(()=>b.click(),100);return true})()");confirm();
+            text(app,"فایل PDF در Downloads/HesabYar ذخیره شد.");
+            byte[] pdfBytes=readReportFile("pdf");assertTrue(pdfBytes.length>64);assertEquals("%PDF-",new String(pdfBytes,0,5,StandardCharsets.US_ASCII));
+            java.io.File pdf=java.io.File.createTempFile("consolidated-", ".pdf", androidx.test.core.app.ApplicationProvider.getApplicationContext().getCacheDir());
+            try{
+                try(java.io.FileOutputStream out=new java.io.FileOutputStream(pdf)){out.write(pdfBytes);}
+                try(android.graphics.pdf.PdfRenderer renderer=new android.graphics.pdf.PdfRenderer(ParcelFileDescriptor.open(pdf,ParcelFileDescriptor.MODE_READ_ONLY))){
+                    assertTrue(renderer.getPageCount()>0);
+                }
+            }finally{pdf.delete();}
+            String excelButton=buttons("خروجی Excel");waitFor(app,excelButton,"Consolidated Excel unavailable");
+            eval(app,"(()=>{const b="+excelButton+";setTimeout(()=>b.click(),100);return true})()");confirm();
+            text(app,"فایل Excel ذخیره شد.");
+            byte[] excel=readReportFile("xlsx");assertTrue(excel.length>128);
+            java.util.Map<String,String> xml=new java.util.HashMap<>();
+            try(java.util.zip.ZipInputStream zip=new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(excel))){
+                java.util.zip.ZipEntry entry;while((entry=zip.getNextEntry())!=null){
+                    if(entry.getName().endsWith(".xml"))xml.put(entry.getName(),new String(zip.readAllBytes(),StandardCharsets.UTF_8));
+                    zip.closeEntry();
+                }
+            }
+            assertNotNull(xml.get("xl/worksheets/sheet1.xml"));assertNotNull(xml.get("xl/worksheets/sheet2.xml"));
+            assertTrue("Workbook total missing",xml.get("xl/worksheets/sheet1.xml").contains("<v>58023</v>"));
+            String all=xml.values().toString();assertTrue(all.contains("Karaj E2E")&&all.contains("Jam E2E"));
+            assertTrue(all.contains("دفتر کرج")&&all.contains("دفتر جم"));assertFalse(all.contains("دفتر اولیه"));
+            click(app,"دفاتر مالی");openCatalogLedger(app,"دفتر کرج");nav(app,"هزینه‌ها");text(app,"Karaj E2E");
+            waitFor(app,"!document.body.innerText.includes('Jam E2E')","Reporting changed the write scope");
             click(app,"قفل");text(app,"حساب‌یار قفل است");
         }
     }
