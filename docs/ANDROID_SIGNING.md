@@ -12,3 +12,6 @@ Do not use the ephemeral CI debug key for company deployment. Existing debug bui
 The workflow has not been run with real signing credentials. No key is created or stored by the assistant; this is deliberately an owner-controlled step. No automated public release is created.
 
 The signed workflow now explicitly sets channel `beta` (`0.1.0-beta.<code>`), verifies the versionName and runs native JVM regression tests before release assembly. The separate emulator smoke workflow should pass for the exact release candidate before owner approval. Do not tag or install a beta until owner-controlled signing and acceptance gates are ready.
+
+## Enforced release gate
+The signed tag must have successful baseline, experimental APK, and Android emulator smoke workflow runs on android at the exact checked-out commit. The workflow rejects non-increasing beta version codes and requires an APK v2 or v3 signature verification plus the configured certificate fingerprint. See ANDROID_RELEASE_CHECKLIST.md for manual device acceptance. Updating that checklist on a candidate commit triggers APK and emulator checks; the emulator job does not upload artifacts. Signing is still owner-controlled; no tag or secrets are provisioned by this change.

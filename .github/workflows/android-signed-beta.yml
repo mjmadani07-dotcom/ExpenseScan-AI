@@ -4,6 +4,7 @@ on:
     tags: ['android-beta-*']
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: expensescan-signed-beta
   cancel-in-progress: false
@@ -25,6 +26,29 @@ jobs:
           test "$code" -ge 100
           echo "ANDROID_VERSION_CODE=$code" >> "$GITHUB_ENV"
           echo "ANDROID_RELEASE_CHANNEL=beta" >> "$GITHUB_ENV"
+          # Release codes are monotonically increasing, even after a failed tag.
+          while IFS= read -r tag; do
+            [ "$tag" = "$GITHUB_REF_NAME" ] && continue
+            prior="${tag#android-beta-}"
+            if [[ "$prior" =~ ^[1-9][0-9]{0,8}$ ]] && [ "$prior" -ge "$code" ]; then
+              echo "Release versionCode must exceed all previous beta tags."
+              exit 1
+            fi
+          done < <(git tag --list 'android-beta-*')
+      - name: Require successful CI for exact release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          names="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$sha&status=success&per_page=100" --jq '.workflow_runs[] | select(.conclusion == "success" and .head_branch == "android") | .name')"
+          for check in "Android baseline checks" "Android experimental APK" "Android emulator smoke"; do
+            if ! grep -Fxq "$check" <<< "$names"; then
+              echo "Release blocked: $check has not succeeded for $sha on android."
+              exit 1
+            fi
+          done
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -85,6 +109,21 @@ jobs:
           out="apk-output/ExpenseScan-${GITHUB_REF_NAME}.apk"
           "$tools/apksigner" sign --ks "$ks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS --out "$out" /tmp/aligned.apk
           "$tools/apksigner" verify --verbose --print-certs "$out" > /tmp/cert.txt
+          grep -Eq '^Verified using v[23] scheme.*: true
+          actual="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/cert.txt | tr '[:upper:]' '[:lower:]')"
+          expected="$(printf '%s' "$EXPECTED_CERT" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
+          test "$actual" = "$expected"
+          "$tools/aapt" dump badging "$out" > /tmp/badging.txt
+          grep -q "package: name='ir.expensescan.hesabyar' versionCode='$ANDROID_VERSION_CODE' versionName='0.1.0-beta.$ANDROID_VERSION_CODE'" /tmp/badging.txt
+          if grep -q application-debuggable /tmp/badging.txt; then exit 1; fi
+          sha256sum "$out" > apk-output/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ExpenseScan-${{ github.ref_name }}
+          path: apk-output/
+          retention-days: 3
+          if-no-files-found: error
+ /tmp/cert.txt
           actual="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/cert.txt | tr '[:upper:]' '[:lower:]')"
           expected="$(printf '%s' "$EXPECTED_CERT" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
           test "$actual" = "$expected"

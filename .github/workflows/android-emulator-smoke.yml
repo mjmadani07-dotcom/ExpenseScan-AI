@@ -6,11 +6,12 @@ on:
     paths:
       - '.github/workflows/android-emulator-smoke.yml'
       - 'native/android/overlay/app/src/androidTest/**'
+      - 'docs/ANDROID_RELEASE_CHECKLIST.md'
 permissions:
   contents: read
 concurrency:
   group: expensescan-emulator-smoke
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   emulator:
     runs-on: ubuntu-latest

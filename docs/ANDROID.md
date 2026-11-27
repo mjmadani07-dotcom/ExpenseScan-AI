@@ -80,3 +80,5 @@ A separate Android 35 emulator workflow starts an installed offline debug app, c
 
 ## Release hardening: approval replay
 Local approval is serialized and commits the ledger and draft removal together. On the latest already-committed draft ID, retries resolve current records by stable ID and creation/approval timestamps rather than returning stored copies. Missing/deleted/replaced records or mismatched count fail closed. UI ignores repeated submit events, does not re-save an already-approved draft, and reloads the committed ledger after success. This is last-approval replay protection, not global deduplication of separately created drafts. Tests cover lost acknowledgement, concurrent retries, edited values and deletion.
+
+Beta release hardening uses docs/ANDROID_RELEASE_CHECKLIST.md to trigger candidate APK/emulator checks without generating unnecessary emulator artifacts. Signed release requires successful checks on the exact android commit, increasing versionCode, and v2/v3 certificate verification. Physical-device acceptance and owner signing setup are separate requirements.
