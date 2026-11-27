@@ -10,6 +10,11 @@ on:
       # Rebuild on user-facing native backup/export changes; keep artifacts short-lived.
       - 'src/components/BackupPanel.tsx'
       - 'src/storage/androidSnapshotStore.ts'
+      - 'src/storage/attachments.ts'
+      - 'src/components/CaptureWorkspace.tsx'
+      - 'src/components/ExpenseLedger.tsx'
+      - 'src/storage/portableBackup.ts'
+      - 'src/storage/localLedgerRepository.ts'
 permissions:
   contents: read
 concurrency:

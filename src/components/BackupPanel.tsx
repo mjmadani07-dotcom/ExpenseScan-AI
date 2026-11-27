@@ -9,7 +9,7 @@ export function BackupPanel({repository,onRestored}:{repository:LedgerRepository
  const run=async(fn:()=>Promise<void>)=>{setBusy(true);setMessage('');setError(false);try{await fn();setRecoveries(await repository.recoveryList!());}catch(e){setError(true);setMessage(e instanceof Error?e.message:'خطای پشتیبان‌گیری');}finally{setBusy(false);}};
  return <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
  <h2 className="text-base font-bold">پشتیبان‌گیری رمزگذاری‌شده و بازیابی</h2>
- <p className="text-xs text-slate-600">فایل قابل انتقال شامل دفتر مالی، پیش‌نویس و فایل‌های اصلی پیوست است، نه کلید API یا تنظیمات اتصال. گذرواژه را جداگانه نگهداری کنید؛ بدون آن بازیابی ممکن نیست. پشتیبان را خارج از فضای خصوصی برنامه ذخیره کنید.</p>
+ <p className="text-xs text-slate-600">فایل قابل انتقال شامل دفتر مالی، پیش‌نویس و فایل‌های اصلی پیوست است، نه کلید API یا تنظیمات اتصال. ظرفیت فایل پشتیبان فعلاً محدود است؛ در صورت تجاوز از ظرفیت، خروجی ناقص ایجاد نمی‌شود. گذرواژه را جداگانه نگهداری کنید؛ بدون آن بازیابی ممکن نیست. پشتیبان را خارج از فضای خصوصی برنامه ذخیره کنید.</p>
  <label className="block text-xs font-semibold">گذرواژه فایل پشتیبان (حداقل ۱۲ نویسه)
  <input type={show?'text':'password'} autoComplete="new-password" value={password} onChange={e=>{setPassword(e.target.value);setPreview(null);}} className="w-full border rounded-lg p-2 mt-1" /></label>
  <label className="block text-xs font-semibold">تکرار گذرواژه برای خروجی

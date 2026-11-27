@@ -246,7 +246,7 @@ public class LedgerStoragePlugin extends Plugin {
         try{
             String id=call.getString("id"),data=call.getString("data");
             AtomicFile file=attachmentFile(id);verifyAttachment(id,data);
-            if(file.exists()){readAttachmentData(file,id);call.resolve();return;}
+            if(file.getBaseFile().exists() || new File(file.getBaseFile().getPath()+".bak").exists()){readAttachmentData(file,id);call.resolve();return;}
             byte[] cipher=encrypt(ATTACHMENT_KEY,data,true).getBytes(StandardCharsets.UTF_8);
             FileOutputStream out=null;
             try{out=file.startWrite();out.write(cipher);file.finishWrite(out);}

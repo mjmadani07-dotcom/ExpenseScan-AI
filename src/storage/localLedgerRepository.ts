@@ -26,7 +26,7 @@ export class LocalLedgerRepository implements LedgerRepository {
     this.queue=task;
     return task;
   }
-  saveDraft(draft:DraftSession|null){return this.change(async(_d,s)=>{if(draft)await this.ensureAttachments(attachmentIds(draft.drafts));if(draft&&s.lastApproval?.id===draft.id)throw new Error('این پیش‌نویس قبلاً ثبت شده است. دفتر را دوباره بارگذاری کنید.');s.draft=draft?structuredClone(draft):null;});}
+  saveDraft(draft:DraftSession|null){return this.change(async(_d,s)=>{if(draft){const existing=new Set(attachmentIds(s.draft?.drafts??[]));await this.ensureAttachments(attachmentIds(draft.drafts).filter(id=>!existing.has(id)));}if(draft&&s.lastApproval?.id===draft.id)throw new Error('این پیش‌نویس قبلاً ثبت شده است. دفتر را دوباره بارگذاری کنید.');s.draft=draft?structuredClone(draft):null;});}
   add(items:ExpenseFields[],draftId?:string){
     return this.change(async(d,s)=>{
       if(draftId&&s.lastApproval?.id===draftId)return s.lastApproval.records;
