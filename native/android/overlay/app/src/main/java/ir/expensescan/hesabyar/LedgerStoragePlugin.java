@@ -440,13 +440,27 @@ public class LedgerStoragePlugin extends Plugin {
         if(result.getResultCode()!=Activity.RESULT_OK||uri==null||!matchesStage(call)||!sessionValid()){
             discardStage();call.reject("Backup export cancelled or session expired; remove any empty destination file.");return;
         }
-        try(FileInputStream in=new FileInputStream(streamFile);OutputStream out=getContext().getContentResolver().openOutputStream(uri,"w")){
-            if(out==null)throw new IllegalStateException("Cannot open destination");
-            byte[] buffer=new byte[65536];int n;long copied=0,expected=streamFile.length();
-            while((n=in.read(buffer))!=-1){if(!sessionValid())throw new IllegalStateException("Session expired");out.write(buffer,0,n);copied+=n;}
-            out.flush();if(copied!=expected)throw new IllegalStateException("Incomplete copy");
-        }catch(Exception ex){discardStage();call.reject("Backup copy failed; destination may contain an incomplete encrypted file. Delete it and retry.");return;}
-        discardStage();call.resolve();
+        final File source=streamFile;
+        // SAF may block on slow/removable/cloud-backed providers. Do not copy on
+        // the Activity callback/main thread or hold the session monitor during I/O.
+        try{new Thread(()->copyStreamBackup(call,uri,source),"ExpenseScan-backup-copy").start();}
+        catch(Exception ex){discardStage();call.reject("Cannot start backup copy; remove any empty destination file.");}
+    }
+    private void copyStreamBackup(PluginCall call,Uri uri,File source){
+        boolean success=false;
+        try{
+            if(!sessionValid())throw new IllegalStateException("Session expired");
+            try(FileInputStream in=new FileInputStream(source);OutputStream out=getContext().getContentResolver().openOutputStream(uri,"w")){
+                if(out==null)throw new IllegalStateException("Cannot open destination");
+                byte[] buffer=new byte[65536];int n;long copied=0,expected=source.length();
+                while((n=in.read(buffer))!=-1){if(!sessionValid())throw new IllegalStateException("Session expired");out.write(buffer,0,n);copied+=n;}
+                out.flush();if(copied!=expected)throw new IllegalStateException("Incomplete copy");
+            }
+            success=true;
+        }catch(Exception ex){/* Report a generic failure; do not log financial data or destination paths. */}
+        finally{synchronized(this){if(matchesStage(call))discardStage();}}
+        if(success)call.resolve();
+        else call.reject("Backup copy failed; destination may contain an incomplete encrypted file. Delete it and retry.");
     }
 
     @PluginMethod public void saveBackupFile(PluginCall call) {saveExport(call,true);}
