@@ -16,6 +16,7 @@ interface NativeLedgerBridge {
   saveExportFile(options:{name:string;data:string;mime:string}):Promise<void>;
   putAttachment(options:{id:string;data:string}):Promise<void>;
   readAttachment(options:{id:string}):Promise<{data:string}>;
+  attachmentInventory():Promise<{items:string}>;
   loadKeys():Promise<{keys:string}>;
   saveKey(options:{provider:string;value:string}):Promise<{keys:string}>;
   saveBackupFile(options:{name:string;data:string}):Promise<void>;
@@ -79,6 +80,7 @@ export async function nativeExportFile(name:string,data:Uint8Array,mime:string){
 }
 
 export const androidAttachments:AttachmentStore={
+ async inventory(){return JSON.parse((await bridge().attachmentInventory()).items);},
  async put(id,data){await verifyAttachment(id,data);await bridge().putAttachment({id,data});},
  async get(id){const result=await bridge().readAttachment({id});await verifyAttachment(id,result.data);return result.data;}
 };

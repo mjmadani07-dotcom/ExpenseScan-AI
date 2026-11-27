@@ -218,6 +218,7 @@ public class LedgerStoragePlugin extends Plugin {
                         if(migration){
                             // Round-trip is checked by TypeScript before sending full migration rows.
                             // All DDL/data writes and the legacy table removal share one transaction.
+                            LedgerTables.verifyMigration(db,upserts,rowCodec());
                             db.execSQL("DROP TABLE ledger_state");db.setVersion(LedgerTables.VERSION);
                         }
                         db.setTransactionSuccessful();committed=true;
@@ -283,6 +284,26 @@ public class LedgerStoragePlugin extends Plugin {
             catch(Exception ex){if(out!=null)file.failWrite(out);throw ex;}
             call.resolve();
         }catch(Exception ex){call.reject("Attachment storage failed; existing documents were not overwritten.");}
+    }
+    @PluginMethod public synchronized void attachmentInventory(PluginCall call){
+        if(!requireSession(call))return;
+        try{
+            File dir=new File(getContext().getFilesDir(),"attachments");
+            JSONArray rows=new JSONArray();java.util.Map<String,Long> sizes=new java.util.HashMap<>();
+            if(dir.exists()){
+                File[] files=dir.listFiles();if(files==null)throw new IllegalStateException("Cannot list attachments");
+                for(File file:files){
+                    String n=file.getName();
+                    if(file.isFile()&&n.matches("[a-f0-9]{64}\\.enc(\\.bak)?")){
+                        String id=n.substring(0,64);sizes.put(id,sizes.getOrDefault(id,0L)+file.length());
+                    }
+                }
+            }
+            for(java.util.Map.Entry<String,Long> row:sizes.entrySet()){
+                JSONObject item=new JSONObject();item.put("id",row.getKey());item.put("storedBytes",row.getValue());rows.put(item);
+            }
+            JSObject result=new JSObject();result.put("items",rows.toString());call.resolve(result);
+        }catch(Exception ex){call.reject("Attachment inventory unavailable.");}
     }
     @PluginMethod public synchronized void readAttachment(PluginCall call){
         if(!requireSession(call))return;

@@ -61,15 +61,27 @@ final class LedgerTables {
         }
         return rows;
     }
+    static void verifyMigration(SQLiteDatabase db,JSONArray expected,Codec codec)throws Exception{
+        JSONArray actual=read(db,codec);
+        if(actual.length()!=expected.length())throw new IllegalStateException("Migration row count mismatch");
+        java.util.Map<String,JSONObject> map=new java.util.HashMap<>();
+        for(int i=0;i<actual.length();i++){JSONObject row=actual.getJSONObject(i);map.put(row.getString("table")+":"+row.getString("id"),row);}
+        for(int i=0;i<expected.length();i++){
+            JSONObject row=expected.getJSONObject(i);
+            JSONObject other=map.remove(row.getString("table")+":"+row.getString("id"));
+            if(other==null||!row.getString("data").equals(other.getString("data"))||!row.opt("parent").equals(other.opt("parent")))throw new IllegalStateException("Migration content mismatch");
+        }
+        if(!map.isEmpty())throw new IllegalStateException("Unexpected migration row");
+    }
     static void apply(SQLiteDatabase db,JSONArray deletes,JSONArray upserts,Codec codec)throws Exception{
         Set<String> seen=new HashSet<>();
         for(int i=0;i<deletes.length();i++){
             JSONObject row=deletes.getJSONObject(i);String t=row.getString("table"),id=id(row,"id");name(t);
-            if(!seen.add(t+"\u0000"+id))throw new IllegalArgumentException("Duplicate row change");
+            if(!seen.add(t+":"+id))throw new IllegalArgumentException("Duplicate row change");
         }
         for(int i=0;i<upserts.length();i++){
             JSONObject row=upserts.getJSONObject(i);String t=row.getString("table"),id=id(row,"id");name(t);
-            if(!seen.add(t+"\u0000"+id))throw new IllegalArgumentException("Duplicate row change");
+            if(!seen.add(t+":"+id))throw new IllegalArgumentException("Duplicate row change");
         }
         // Delete children first and write parents first to preserve FK integrity.
         for(int k=TABLES.length-1;k>=0;k--)for(int i=0;i<deletes.length();i++){

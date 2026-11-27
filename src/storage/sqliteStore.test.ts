@@ -210,3 +210,14 @@ test('row changes preserve independent recovery snapshots and remove dependent c
  assert.deepEqual(patch.deletes.map(x=>x.table),['expenses','line_items']);assert.deepEqual(patch.upserts.map(x=>x.table),['meta']);
  assert.equal(assembleLedger(next).recoveries![0].ledger.expenses.length,1);
 });
+
+test('attachment inventory protects recovery-only and draft-only references and detects missing files',async()=>{
+ const {auditAttachmentInventory}=await import('./attachments');const {emptyLedger}=await import('./ledgerDomain');
+ const date='2026-11-27T00:00:00Z',a='a'.repeat(64),b='b'.repeat(64),c='c'.repeat(64),d='d'.repeat(64);
+ const record=(id:string,attachmentId:string)=>({...expense,id,createdAt:date,approvedAt:date,attachmentId,attachmentMime:'application/pdf'});
+ const ledger=emptyLedger();ledger.expenses=[record('active',a)];
+ const recovery=emptyLedger();recovery.expenses=[record('recovered',b)];
+ const draft={id:'draft',drafts:[{...expense,tempId:'draft-item',selected:true,attachmentId:c,attachmentMime:'application/pdf'}],previewPages:[]};
+ const audit=auditAttachmentInventory([{id:a,storedBytes:10},{id:b,storedBytes:20},{id:d,storedBytes:40}],{ledger,draft,recoveries:[{id:'r',createdAt:date,ledger:recovery,draft:null}]});
+ assert.deepEqual(audit,{referenced:3,missing:1,unreferenced:1,unreferencedBytes:40,storedBytes:70});
+});

@@ -50,3 +50,5 @@ The app exports an original through the Android file chooser for viewing in a co
 
 ## Native schema 3
 Native finance data now lives in encrypted per-entity tables with FK-checked line items/tranches and atomic revision-checked row patches. Migration validates and round-trips legacy state before the native transaction creates rows and drops the old table. The 32 MiB former whole-ledger write cap is replaced by a 32 MiB per-row limit and a 64 MiB patch limit; the JS bridge still materializes the full ledger, and recovery rows/portable backups remain limited. No claim of unlimited capacity or on-device migration verification. See DATA_MODEL.md.
+
+Settings → Backup → Attachment storage audit reports referenced, missing and unreferenced originals and actual encrypted bytes. This is deliberately read-only pending race-safe cleanup and on-device verification. A missing-file count tests file presence, not full cryptographic integrity; read/export still verifies the digest.

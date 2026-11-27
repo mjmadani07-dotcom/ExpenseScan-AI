@@ -17,6 +17,7 @@ export interface LedgerRepository {
   deleteCategory(id:string,reassignToId?:string):Promise<{ledger:LedgerData;reassignedCount:number}>;
   loadDraft?():Promise<DraftSession|null>;
   saveDraft?(draft:DraftSession|null):Promise<void>;
+  attachmentAudit?():Promise<import('./attachments').AttachmentAudit>;
   exportBackup?():Promise<import('./portableBackup').BackupSnapshot>;
   restoreBackup?(snapshot:import('./portableBackup').BackupSnapshot):Promise<void>;
   recoveryInfo?():Promise<{createdAt:string;count:number}|null>;
