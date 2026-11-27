@@ -64,6 +64,11 @@ jobs:
         env:
           ANDROID_VERSION_CODE: ${{ github.run_number }}
         run: node scripts/prepare-android.mjs
+      - name: Native JVM regression tests
+        working-directory: .android-build/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:testDebugUnitTest
       - name: Build debug APK
         working-directory: .android-build/android
         run: |

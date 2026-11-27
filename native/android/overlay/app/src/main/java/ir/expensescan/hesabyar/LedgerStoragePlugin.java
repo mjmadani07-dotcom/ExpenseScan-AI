@@ -45,7 +45,6 @@ public class LedgerStoragePlugin extends Plugin {
     private static final String VAULT_KEY = "expensescan.vault.aes.v1";
     private static final String ATTACHMENT_KEY = "expensescan.attachment.aes.v1";
     private static final int MAX_ATTACHMENT = 12*1024*1024;
-    private static final long ORPHAN_GRACE_MS=24L*60*60*1000;
     private static final String PREFIX = "gcm1:";
     private static final int MAX_PAYLOAD = 32 * 1024 * 1024;
 
@@ -349,7 +348,7 @@ public class LedgerStoragePlugin extends Plugin {
                             if(protectedIds.contains(id))continue;
                             long touched=file.lastModified();
                             // Leave recent captures and all incomplete/recovery sidecars alone.
-                            if(touched<=0||touched>now-ORPHAN_GRACE_MS||new File(file.getPath()+".bak").exists()||new File(file.getPath()+".new").exists()){skipped++;continue;}
+                            if(!AttachmentReferences.eligible(id,protectedIds,touched,now,new File(file.getPath()+".bak").exists()||new File(file.getPath()+".new").exists())){skipped++;continue;}
                             long bytes=file.length();
                             if(file.delete()){removed++;released+=bytes;}else failed++;
                         }

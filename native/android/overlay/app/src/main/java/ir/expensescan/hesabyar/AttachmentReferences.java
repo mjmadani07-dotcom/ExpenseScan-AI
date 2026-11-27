@@ -7,6 +7,9 @@ import java.util.Set;
 
 // Only inspect the domain fields that actually carry attachment references.
 final class AttachmentReferences {
+    static boolean eligible(String id,Set<String> protectedIds,long touched,long now,boolean sidecar){
+        return id.matches("[a-f0-9]{64}")&&!protectedIds.contains(id)&&touched>0&&touched<=now-24L*60*60*1000&&!sidecar;
+    }
     private static void record(JSONObject row,Set<String> ids)throws Exception{
         boolean hasId=!row.isNull("attachmentId"),hasMime=!row.isNull("attachmentMime");
         if(hasId!=hasMime)throw new IllegalStateException("Incomplete attachment reference");
