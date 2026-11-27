@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { AttachmentViewer } from './AttachmentViewer';
 import {
   AlertTriangle,
   Check,
@@ -75,6 +76,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
 }) => {
   const activeCategories = useMemo(() => resolveCategories(categories), [categories]);
   const [activePageIndex, setActivePageIndex] = useState(0);
+  const [viewOriginal,setViewOriginal]=useState<string|null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const selectedCount = useMemo(
@@ -381,6 +383,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                   )}
                 </div>
 
+                {draft.attachmentId&&draft.attachmentMime&&<AttachmentViewer id={draft.attachmentId} mime={draft.attachmentMime} name={draft.sourceFileName} open={viewOriginal===draft.tempId} onToggle={()=>setViewOriginal(v=>v===draft.tempId?null:draft.tempId)}/>}
                 {/* Extraction & Duplicate Alerts */}
                 {draft.extractionNotes && (
                   <div className="rounded-xl bg-slate-50 border border-slate-200 px-3.5 py-2.5 text-xs text-slate-700 leading-relaxed">

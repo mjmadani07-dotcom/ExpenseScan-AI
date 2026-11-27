@@ -1,4 +1,5 @@
 import { isAndroidRuntime,nativeExportAttachment } from '../storage/androidSnapshotStore';
+import { AttachmentViewer } from './AttachmentViewer';
 import { businessDateIso } from '../utils/jalali';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -122,6 +123,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
   const [isClearingSamples, setIsClearingSamples] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmRemovePreview, setConfirmRemovePreview] = useState(false);
+  const [viewOriginal,setViewOriginal]=useState<string|null>(null);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [isMutating, setIsMutating] = useState(false);
   const [rateDraft, setRateDraft] = useState<number>(0);
@@ -155,6 +157,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
     setIsEditingFull(false);
     setConfirmDeleteId(null);
     setConfirmRemovePreview(false);
+    setViewOriginal(null);
     setTrancheError(null);
     setTranchesDraft(selectedExpense?.paymentTranches ?? []);
   }, [selectedExpense?.id, rates]);
@@ -1278,7 +1281,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                   )}
                 </div>
 
-                {selectedExpense.attachmentId && <div className="rounded-xl border p-3 space-y-2 text-xs"><p className="font-semibold">فایل اصلی رمزگذاری‌شده</p><p className="break-all">{selectedExpense.sourceFileName??'پیوست سند'}</p>{isAndroidRuntime()&&<button type="button" disabled={isMutating} className="border rounded-lg p-2" onClick={()=>{if(window.confirm('فایل اصلی بدون رمزگذاری در مسیر انتخابی ذخیره شود؟'))void runMutation(()=>nativeExportAttachment(selectedExpense.attachmentId!,selectedExpense.attachmentMime!));}}>ذخیره فایل اصلی برای مشاهده</button>}<button type="button" disabled={isMutating} className="text-red-700 border rounded-lg p-2 mr-2" onClick={()=>{if(window.confirm('اتصال فایل اصلی به این سند حذف شود؟ نسخه‌های بازیابی ممکن است همچنان آن را داشته باشند.'))void runMutation(()=>onUpdateExpense(selectedExpense.id,{attachmentId:undefined,attachmentMime:undefined}));}}>قطع اتصال پیوست</button></div>}
+                {selectedExpense.attachmentId && <div className="rounded-xl border p-3 space-y-2 text-xs"><p className="font-semibold">فایل اصلی رمزگذاری‌شده</p><p className="break-all">{selectedExpense.sourceFileName??'پیوست سند'}</p>{selectedExpense.attachmentMime&&<AttachmentViewer id={selectedExpense.attachmentId} mime={selectedExpense.attachmentMime} name={selectedExpense.sourceFileName} open={viewOriginal===selectedExpense.id} onToggle={()=>setViewOriginal(v=>v===selectedExpense.id?null:selectedExpense.id)}/>}{isAndroidRuntime()&&<button type="button" disabled={isMutating} className="border rounded-lg p-2" onClick={()=>{if(window.confirm('فایل اصلی بدون رمزگذاری در مسیر انتخابی ذخیره شود؟'))void runMutation(()=>nativeExportAttachment(selectedExpense.attachmentId!,selectedExpense.attachmentMime!));}}>ذخیره فایل اصلی خارج از برنامه</button>}<button type="button" disabled={isMutating} className="text-red-700 border rounded-lg p-2 mr-2" onClick={()=>{if(window.confirm('اتصال فایل اصلی به این سند حذف شود؟ نسخه‌های بازیابی ممکن است همچنان آن را داشته باشند.'))void runMutation(()=>onUpdateExpense(selectedExpense.id,{attachmentId:undefined,attachmentMime:undefined}));}}>قطع اتصال پیوست</button></div>}
                 {selectedExpense.sourcePreviewUrl && (
                   <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-100 relative">
                     <img

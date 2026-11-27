@@ -334,3 +334,21 @@ test('large ledger active projection preserves 3000 documents, amounts and order
  assert.ok(JSON.stringify(activeRows).length<JSON.stringify(rows).length);assert.throws(()=>assembleLedger(activeRows),/نامعتبر/);assert.throws(()=>assembleLedger(rows,'active'),/نامعتبر/);
  const changed=structuredClone(state);changed.ledger.expenses[1500].title='Changed';const patch=diffLedgerRows(rows,partitionLedger(changed));assert.deepEqual(patch.upserts.map(x=>x.table),['expenses']);assert.equal(patch.deletes.length,0);
 });
+
+
+test('attachment viewer verifies original bytes and never treats text as HTML',async()=>{
+ const {readAttachmentPreview,identifyPreview,boundedPdfScale,TEXT_PREVIEW_BYTES}=await import('../utils/attachmentPreview');
+ const {digestBytes,encodeBytes}=await import('./attachments');
+ const text=new TextEncoder().encode('<script>alert(1)</script>');
+ const id=await digestBytes(text),data=encodeBytes(text);
+ const preview=await readAttachmentPreview({async get(){return data;}},id,'text/plain');
+ assert.deepEqual(preview,{kind:'text',text:'<script>alert(1)</script>',truncated:false});
+ await assert.rejects(()=>readAttachmentPreview({async get(){return data;}},id,'image/jpeg'));
+ await assert.rejects(()=>readAttachmentPreview({async get(){return data;}},'0'.repeat(64),'text/plain'));
+ const pdf=new TextEncoder().encode('%PDF-1.7');
+ assert.equal(identifyPreview(pdf,'application/pdf').kind,'pdf');
+ const png=new Uint8Array([137,80,78,71,13,10,26,10]);assert.equal(identifyPreview(png,'image/png').kind,'image');
+ const truncated=identifyPreview(new Uint8Array(TEXT_PREVIEW_BYTES+1),'text/csv');assert.ok(truncated.kind==='text'&&truncated.truncated);
+ const scale=boundedPdfScale(50000,50000);assert.ok(scale*50000<=2400&&scale*scale*50000*50000<=4_000_001);
+ assert.throws(()=>boundedPdfScale(0,100));
+});
