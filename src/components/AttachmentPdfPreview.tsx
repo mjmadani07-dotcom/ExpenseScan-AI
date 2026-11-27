@@ -30,7 +30,7 @@ export default function AttachmentPdfPreview({bytes}:{bytes:Uint8Array<ArrayBuff
  useEffect(()=>{
   let stopped=false;
   // Render canvas only: no links, scripting, annotations, or external document navigation.
-  const loading=getDocument({data:bytes.slice(),isEvalSupported:false,enableXfa:false,useSystemFonts:true,stopAtErrors:true,maxImageSize:16_000_000});
+  const loading=getDocument({data:bytes.slice(),enableXfa:false,useSystemFonts:true,stopAtErrors:true,maxImageSize:16_000_000});
   loading.promise.then(value=>{if(!stopped)setDoc(value);}).catch(()=>{if(!stopped)setError('PDF آسیب‌دیده، دارای رمز یا غیرقابل نمایش است.');});
   return ()=>{stopped=true;void loading.destroy().catch(()=>{});};
  },[bytes]);
