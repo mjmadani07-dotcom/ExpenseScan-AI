@@ -23,7 +23,7 @@ export class LocalLedgerRepository implements LedgerRepository {
     this.queue=task;
     return task;
   }
-  saveDraft(draft:DraftSession|null){return this.change((_d,s)=>{s.draft=draft?structuredClone(draft):null;});}
+  saveDraft(draft:DraftSession|null){return this.change((_d,s)=>{if(draft&&s.lastApproval?.id===draft.id)throw new Error('این پیش‌نویس قبلاً ثبت شده است. دفتر را دوباره بارگذاری کنید.');s.draft=draft?structuredClone(draft):null;});}
   add(items:ExpenseFields[],draftId?:string){
     return this.change((d,s)=>{
       if(draftId&&s.lastApproval?.id===draftId)return s.lastApproval.records;

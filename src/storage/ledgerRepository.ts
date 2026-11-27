@@ -21,10 +21,10 @@ export interface LedgerRepository {
 
 export class WebLedgerRepository implements LedgerRepository {
   readonly mode='web' as const;
-  constructor(private readonly fetcher:typeof fetch = fetch) {}
+  constructor(private readonly fetcher:typeof fetch = (...args) => globalThis.fetch(...args)) {}
   private async request<T>(url:string,method='GET',body?:unknown):Promise<T>{
     let res:Response;
-    try { res=await this.fetcher(url,{method, ...(body!==undefined?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body,(_k,v)=>v===undefined?null:v)}:{})}); }
+    try { res=await this.fetcher(url,{method, ...(body!==undefined?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})}); }
     catch { throw new Error('ارتباط با سرور برقرار نشد؛ نتیجه تغییر نامشخص است. پیش از تلاش مجدد دفتر را بررسی کنید.'); }
     const data=await res.json().catch(()=>null);
     if(!res.ok) throw new Error(data?.error || `خطای سرور (${res.status})`);
@@ -34,7 +34,7 @@ export class WebLedgerRepository implements LedgerRepository {
   load(){return this.request<LedgerData>('/api/ledger');}
   aiStatus(){return this.request<AiProviderStatus>('/api/ai/status').catch(()=>null);}
   async add(items:ExpenseFields[]){const r=await this.request<{created:ExpenseRecord[]}>('/api/expenses/batch','POST',{expenses:items});if(!Array.isArray(r.created)||r.created.length!==items.length)throw new Error('پاسخ ثبت نامعتبر است.');return r.created;}
-  async update(id:string,patch:Partial<ExpenseFields>){return (await this.request<{expense:ExpenseRecord}>('/api/expenses/'+encodeURIComponent(id),'PATCH',patch)).expense;}
+  async update(id:string,patch:Partial<ExpenseFields>){return (await this.request<{expense:ExpenseRecord}>('/api/expenses/'+encodeURIComponent(id),'PATCH',Object.fromEntries(Object.entries(patch).map(([k,v])=>[k,v===undefined?null:v])))).expense;}
   async remove(id:string){await this.request('/api/expenses/'+encodeURIComponent(id),'DELETE');}
   settings(budgets:CategoryBudget[],rates:ExchangeRates,aiConfig:AiConfig){return this.request<LedgerData & {aiStatus?:AiProviderStatus}>('/api/settings','PUT',{budgets,rates,aiConfig});}
   import(data:unknown,mode:JsonImportMode){return this.request<{ledger:LedgerData;stats:JsonImportStats}>('/api/ledger/import','POST',{data,mode});}

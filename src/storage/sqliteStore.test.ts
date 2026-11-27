@@ -77,3 +77,13 @@ test('Web adapter propagates failed mutations instead of pretending to save',asy
   const offline=new WebLedgerRepository(async()=>{throw new TypeError('offline');});
   await assert.rejects(()=>offline.add([expense]),/ارتباط/);
 });
+
+test('Web transport omits optional undefined fields on create and sends explicit null only for cleared patch fields',async()=>{
+  const sent:unknown[]=[];
+  const repo=new WebLedgerRepository(async(_url,init)=>{sent.push(JSON.parse(String(init?.body)));return new Response(JSON.stringify({created:[{...expense,id:'a'}],expense:{...expense,id:'a'}}),{status:200});});
+  await repo.add([{...expense,notes:undefined}]);
+  assert.equal(Object.hasOwn((sent[0] as any).expenses[0],'notes'),false);
+  await repo.update('a',{notes:undefined,paymentTranches:[{id:'t',title:'T',amount:1,method:'cash',status:'pending',date:undefined}]});
+  assert.equal((sent[1] as any).notes,null);
+  assert.equal(Object.hasOwn((sent[1] as any).paymentTranches[0],'date'),false);
+});

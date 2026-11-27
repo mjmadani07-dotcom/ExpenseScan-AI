@@ -1,5 +1,5 @@
-import { WebLedgerRepository, type LedgerRepository } from './storage/ledgerRepository';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { WebLedgerRepository, type LedgerRepository, type DraftSession } from './storage/ledgerRepository';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Camera,
   CheckCircle2,
@@ -79,6 +79,7 @@ export default function App({ repository = webRepository }: { repository?: Ledge
   const [cachedOnly, setCachedOnly] = useState(false);
 
   const [pendingDrafts, setPendingDrafts] = useState<ExtractedExpenseDraft[] | null>(null);
+  const draftRef = useRef<DraftSession | null>(null);
   const [previewPages, setPreviewPages] = useState<string[]>([]);
   const [isSavingBatch, setIsSavingBatch] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -117,7 +118,13 @@ export default function App({ repository = webRepository }: { repository?: Ledge
   const loadLedger = useCallback(async () => {
     setLoadError(null);
     try {
-      const [data, statusData] = await Promise.all([repository.load(), repository.aiStatus()]);
+      const [data, statusData, recovered] = await Promise.all([repository.load(), repository.aiStatus(), repository.loadDraft ? repository.loadDraft() : Promise.resolve(null)]);
+      if (repository.mode === 'local') {
+        draftRef.current = recovered;
+        setPendingDrafts(recovered?.drafts ?? null);
+        setPreviewPages(recovered?.previewPages ?? []);
+        if (recovered) setActiveTab('capture');
+      }
       setLedger(data);
       setCachedOnly(false);
       saveCache(data);
@@ -156,18 +163,49 @@ export default function App({ repository = webRepository }: { repository?: Ledge
     showToast('کلید امنیتی شخصی از این دستگاه حذف شد.');
   };
 
+  const persistDraft = (session:DraftSession|null) => {
+    draftRef.current=session;
+    setPendingDrafts(session?.drafts ?? null);
+    setPreviewPages(session?.previewPages ?? []);
+    if (repository.saveDraft) {
+      void repository.saveDraft(session).catch(err=>{
+        setSaveError('ذخیره پیش‌نویس ناموفق بود: '+(err instanceof Error ? err.message : 'خطای ذخیره‌سازی'));
+      });
+    }
+  };
+
+  const handleDraftsReady = async (drafts:ExtractedExpenseDraft[],pages:string[]) => {
+    setSaveError(null);
+    persistDraft({id:globalThis.crypto.randomUUID(),drafts,previewPages:pages});
+  };
+  const handleUpdateDrafts = (drafts:ExtractedExpenseDraft[]) => {
+    if (!draftRef.current) return;
+    persistDraft({...draftRef.current,drafts});
+  };
+  const handleDiscardDrafts = async () => {
+    if (!window.confirm('پیش‌نویس‌ها حذف شوند؟')) return;
+    try {
+      if (repository.saveDraft) await repository.saveDraft(null);
+      draftRef.current=null;setPendingDrafts(null);setPreviewPages([]);setSaveError(null);
+    } catch(err) {setSaveError(err instanceof Error ? err.message : 'حذف پیش‌نویس ناموفق بود');}
+  };
+
   const handleApproveBatch = async (approvedItems: ExpenseFields[]) => {
     setIsSavingBatch(true);
     setSaveError(null);
     try {
-      const created = await repository.add(approvedItems);
+      const session = draftRef.current;
+      if (repository.saveDraft && session) await repository.saveDraft(session);
+      const created = await repository.add(approvedItems, session?.id);
       if (!Array.isArray(created) || created.length !== approvedItems.length) throw new Error('پاسخ ثبت سند نامعتبر است؛ قبل از تلاش مجدد دفتر را بررسی کنید.');
 
       setLedger((prev) => {
-        const next = { ...prev, expenses: [...created, ...prev.expenses] };
+        const createdIds = new Set(created.map(item=>item.id));
+        const next = { ...prev, expenses: [...created, ...prev.expenses.filter(item=>!createdIds.has(item.id))] };
         saveCache(next);
         return next;
       });
+      draftRef.current=null;
       setPendingDrafts(null);
       setPreviewPages([]);
       setLedgerCategoryFilter('all');
@@ -531,11 +569,7 @@ export default function App({ repository = webRepository }: { repository?: Ledge
                   handleSaveSettings(ledger.budgets, ledger.rates, nextAiConfig)
                 }
                 onOpenSettings={() => navigateTab('settings')}
-                onDraftsReady={(drafts, pages) => {
-                  setPendingDrafts(drafts);
-                  setPreviewPages(pages);
-                  setSaveError(null);
-                }}
+                onDraftsReady={handleDraftsReady}
               />
             )}
 
@@ -549,22 +583,12 @@ export default function App({ repository = webRepository }: { repository?: Ledge
                 rates={ledger.rates}
                 isSaving={isSavingBatch}
                 saveError={saveError}
-                onUpdateDrafts={setPendingDrafts}
+                onUpdateDrafts={handleUpdateDrafts}
                 onClearPreviewPages={() => {
-                  setPreviewPages([]);
-                  setPendingDrafts((prev) =>
-                    prev
-                      ? prev.map((d) => ({ ...d, sourcePreviewUrl: undefined }))
-                      : null
-                  );
+                  if (draftRef.current) persistDraft({...draftRef.current,previewPages:[],drafts:draftRef.current.drafts.map(d=>({...d,sourcePreviewUrl:undefined}))});
                 }}
                 onApprove={handleApproveBatch}
-                onCancel={() => {
-                  if (!window.confirm('پیش‌نویس‌ها حذف شوند؟')) return;
-                  setPendingDrafts(null);
-                  setPreviewPages([]);
-                  setSaveError(null);
-                }}
+                onCancel={() => void handleDiscardDrafts()}
               />
             )}
 
