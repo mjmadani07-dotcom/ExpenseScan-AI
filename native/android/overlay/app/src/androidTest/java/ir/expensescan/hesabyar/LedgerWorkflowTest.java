@@ -9,6 +9,7 @@ import androidx.test.uiautomator.UiDevice;
 import androidx.test.uiautomator.UiObject2;
 import androidx.test.uiautomator.Until;
 import org.json.JSONObject;
+import org.json.JSONArray;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import java.io.InputStream;
@@ -123,7 +124,8 @@ public class LedgerWorkflowTest {
             assertTrue("Device must retain its secure credential",keyguard().isDeviceSecure());
         }catch(AssertionError|Exception ex){diagnostics("Device lockscreen unlock failed");throw ex;}
     }
-    private void unlock(ActivityScenario<MainActivity> app)throws Exception{
+    private void unlock(ActivityScenario<MainActivity> app)throws Exception{unlock(app,false);}
+    private void unlock(ActivityScenario<MainActivity> app,boolean multi)throws Exception{
         unlockDeviceScreen();
         text(app,"حساب‌یار قفل است");
         JSONObject status=bridge(app,"Capacitor.Plugins.LedgerStorage.sessionStatus()");
@@ -158,7 +160,7 @@ public class LedgerWorkflowTest {
             end=android.os.SystemClock.elapsedRealtime()+25000;
             while(credentialActivity(resumed())&&android.os.SystemClock.elapsedRealtime()<end)Thread.sleep(300);
             if(credentialActivity(resumed())){diagnostics("Credential verification did not return");fail("System credential did not verify");}
-            waitFor(app,"document.querySelector('nav[aria-label=\"ناوبری موبایل\"]')","App did not unlock with system credential");
+            waitFor(app,multi?"document.querySelector('h1')?.textContent.trim()==='دفاتر مالی'":"document.querySelector('nav[aria-label=\"ناوبری موبایل\"]')","App did not unlock with system credential");
             waitFor(app,"!document.body.innerText.includes('در حال بارگذاری')","Ledger loading failed");
         }catch(AssertionError|Exception ex){diagnostics("Unlock failed");throw ex;}
     }
@@ -303,6 +305,61 @@ public class LedgerWorkflowTest {
             JSONObject persisted=record(app,EDITED,23456);
             assertEquals(id,persisted.getString("id"));assertEquals(attachment,persisted.getString("attachmentId"));
             openRecord(app,EDITED);click(app,"مشاهده فایل اصلی در حساب‌یار");text(app,"E2E original receipt");
+        }
+    }
+
+    private void openCatalogLedger(ActivityScenario<MainActivity> app,String name)throws Exception{
+        String target="Array.from(document.querySelectorAll('article')).find(a=>a.querySelector('h2')?.textContent.trim()==="+JSONObject.quote(name)+")?.querySelector('button')";
+        waitFor(app,target,"Catalog entry missing: "+name);
+        eval(app,"("+target+").click()");
+        waitFor(app,"document.querySelector('nav[aria-label=\"ناوبری موبایل\"]')","Ledger did not open");
+        text(app,"دفتر فعال");
+        waitFor(app,"Array.from(document.querySelectorAll('header')).some(h=>h.getClientRects().length&&h.innerText.includes("+JSONObject.quote(name)+"))","Active ledger header is incorrect");
+    }
+    private void createCatalogLedger(ActivityScenario<MainActivity> app,String name)throws Exception{
+        click(app,"دفتر جدید");field(app,"input[placeholder='مثلاً دفتر کرج']",name);click(app,"ذخیره دفتر");
+        waitFor(app,"Array.from(document.querySelectorAll('article h2')).some(h=>h.textContent.trim()==="+JSONObject.quote(name)+")","New ledger not saved");
+    }
+    private void returnToCatalog(ActivityScenario<MainActivity> app)throws Exception{
+        nav(app,"داشبورد");click(app,"تغییر دفتر");text(app,"دفاتر مالی");
+    }
+    @Test public void multiLedgerCatalogAndScopedCapture()throws Exception{
+        unlockDeviceScreen();
+        assertEquals("1",shell("settings get global airplane_mode_on"));
+        try(ActivityScenario<MainActivity> app=ActivityScenario.launch(MainActivity.class)){
+            unlock(app,true);
+            createCatalogLedger(app,"دفتر کرج");
+            createCatalogLedger(app,"دفتر جم");
+            openCatalogLedger(app,"دفتر کرج");
+            click(app,"تومان");nav(app,"ثبت سند");text(app,"ثبت سند در دفتر:");
+            click(app,"ثبت دستی (آفلاین)");text(app,"بررسی و تایید نهایی پیش‌نویس");
+            field(app,"input[id^='title-']","Karaj E2E");field(app,"input[id^='vendor-']","Synthetic vendor");field(app,"input[id^='amount-']","34567");
+            waitFor(app,"document.querySelector('form button[type=submit]:not(:disabled)')","Approval unavailable");
+            eval(app,"document.querySelector('form button[type=submit]').click()");
+            waitFor(app,"!document.querySelector('input[id^=\"title-\"]')","Approval did not complete");
+            text(app,"Karaj E2E");
+            returnToCatalog(app);
+            openCatalogLedger(app,"دفتر جم");nav(app,"هزینه‌ها");
+            waitFor(app,"!document.body.innerText.includes('Karaj E2E')","Karaj expense leaked into Jam");
+            JSONObject result=bridge(app,"Capacitor.Plugins.LedgerStorage.readMulti()");
+            assertTrue(result.getBoolean("ok"));
+            JSONArray workspaces=new JSONArray(result.getJSONObject("value").getString("workspaces"));
+            int karaj=0,jam=0;boolean foundKaraj=false,foundJam=false;
+            for(int i=0;i<workspaces.length();i++){
+                JSONObject w=workspaces.getJSONObject(i);String name=w.getJSONObject("profile").getString("name");
+                JSONArray rows=w.getJSONArray("rows");
+                if("دفتر کرج".equals(name))foundKaraj=true;if("دفتر جم".equals(name))foundJam=true;
+                for(int j=0;j<rows.length();j++){
+                    JSONObject row=rows.getJSONObject(j);if(!"expenses".equals(row.getString("table")))continue;
+                    if("دفتر کرج".equals(name)){
+                        karaj++;JSONObject record=new JSONObject(row.getString("data")).getJSONObject("header");
+                        assertEquals("Karaj E2E",record.getString("title"));assertEquals(34567,record.getInt("amount"));assertEquals("IRT",record.getString("currency"));
+                    }else if("دفتر جم".equals(name))jam++;
+                }
+            }
+            assertTrue(foundKaraj&&foundJam);assertEquals(1,karaj);assertEquals(0,jam);
+            returnToCatalog(app);openCatalogLedger(app,"دفتر کرج");nav(app,"هزینه‌ها");text(app,"Karaj E2E");
+            click(app,"قفل");text(app,"حساب‌یار قفل است");
         }
     }
 }

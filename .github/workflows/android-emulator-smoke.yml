@@ -34,6 +34,7 @@ jobs:
       - name: Build offline native bundle
         env:
           VITE_ANDROID_BUILD: 'true'
+          VITE_MULTI_LEDGER_INTERNAL: ${{ github.ref_name == 'android-multi-ledger' && 'true' || 'false' }}
         run: |
           bun install --frozen-lockfile
           bun run lint
@@ -113,6 +114,9 @@ jobs:
             adb shell am instrument -w -e class ir.expensescan.hesabyar.MultiLedgerDeviceTest ir.expensescan.hesabyar.test/androidx.test.runner.AndroidJUnitRunner | tee /tmp/multi-ledger-result.txt
             grep -Eq '^OK \(1 test\)' /tmp/multi-ledger-result.txt
             ! grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' /tmp/multi-ledger-result.txt
+            adb shell am instrument -w -e class 'ir.expensescan.hesabyar.LedgerWorkflowTest#multiLedgerCatalogAndScopedCapture' ir.expensescan.hesabyar.test/androidx.test.runner.AndroidJUnitRunner | tee /tmp/multi-ledger-ui-result.txt
+            grep -Eq '^OK \(1 test\)' /tmp/multi-ledger-ui-result.txt
+            ! grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' /tmp/multi-ledger-ui-result.txt
             exit 0
           fi
           adb shell am instrument -w -e class 'ir.expensescan.hesabyar.LedgerDeviceTest,ir.expensescan.hesabyar.LedgerWorkflowTest#offlineInvoiceLifecycleAndPortableBackup' ir.expensescan.hesabyar.test/androidx.test.runner.AndroidJUnitRunner | tee /tmp/expensescan-e2e-result.txt
