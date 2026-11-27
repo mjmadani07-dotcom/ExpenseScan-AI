@@ -54,7 +54,13 @@ final class ExpenseReportPdf {
         y=line(c,"تعداد اسناد: "+checked(r.getString("count"),20)+"  |  واحد: "+checked(r.getString("unit"),30),y,11,false);
         y=line(c,"جمع: "+checked(r.getString("total"),100)+"  |  پرداخت: "+checked(r.getString("paid"),100)+"  |  مانده: "+checked(r.getString("remaining"),100),y,12,true);
         draw(c,layout("صفحه "+n+"  •  حساب‌یار",W-2*M,10,INK,false),M,H-24);
-        return y+cells(c,HEADERS,y,true,false,false);
+        String[] headers=HEADERS;
+        if(r.has("headers")){
+            JSONArray custom=r.getJSONArray("headers");
+            if(custom.length()!=WIDTHS.length)throw new IllegalArgumentException("Invalid headers");
+            headers=new String[WIDTHS.length];for(int i=0;i<headers.length;i++)headers[i]=checked(custom.getString(i),60);
+        }
+        return y+cells(c,headers,y,true,false,false);
     }
     static byte[] render(JSONObject r)throws Exception{
         JSONArray rows=r.getJSONArray("rows");if(rows.length()>2000)throw new IllegalArgumentException("Too many records");

@@ -1,6 +1,7 @@
 import { LocalLedgerRepository } from './localLedgerRepository';
 import { ScopedLedgerStore,changeCatalog,createLedger,editLedgerProfile,validateMultiLedger,type MultiLedgerStore,type LedgerProfile,type MultiLedgerState } from './multiLedger';
 import { canonicalJson } from './ledgerRows';
+import {makeConsolidatedReport,type ReportSelection,type ConsolidatedReport} from '../utils/consolidatedReport';
 import type { AttachmentStore } from './attachments';
 import type { DraftSession } from './ledgerRepository';
 
@@ -23,6 +24,8 @@ export class MultiLedgerSession {
   try{const result=await fn();this.assertOpen();return result;}finally{this.operating=false;}
  }
  private assertCatalog(){this.assertOpen();if(this.active)throw new Error('ابتدا از دفتر فعال خارج شوید.');}
+ async report(selection:ReportSelection){return this.exclusive(async()=>{this.assertCatalog();return makeConsolidatedReport((await this.store.read()).state,selection);});}
+ async exportReport<T>(report:ConsolidatedReport,write:(snapshot:ConsolidatedReport)=>Promise<T>){return this.exclusive(async()=>{this.assertCatalog();return write(structuredClone(report));});}
  async catalog(){return this.exclusive(async()=>{this.assertCatalog();return describeCatalog((await this.store.read()).state);});}
  async create(name:string,color:string){return this.exclusive(async()=>{this.assertCatalog();return describeCatalog(await changeCatalog(this.store,s=>createLedger(s,name,color)));});}
  async edit(id:string,patch:Partial<Pick<LedgerProfile,'name'|'color'|'archived'>>){return this.exclusive(async()=>{this.assertCatalog();return describeCatalog(await changeCatalog(this.store,s=>editLedgerProfile(s,id,patch)));});}

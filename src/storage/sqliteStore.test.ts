@@ -511,3 +511,26 @@ test('workspace catalog renders explicit ledger labels and scoped draft indicato
  const html=renderToStaticMarkup(React.createElement(LedgerCatalog,{items,busy:false,error:'',onOpen:()=>{},onCreate:()=>{},onEdit:()=>{},onLock:()=>{},onRefresh:()=>{}}));
  assert.match(html,/دفتر کرج/);assert.match(html,/دفتر جم/);assert.match(html,/پیش‌نویس ذخیره‌شده/);assert.doesNotMatch(html,/شخصی/);assert.match(html,/ورود به دفتر/);
 });
+
+test('consolidated report snapshot, PDF rows and Excel numeric totals agree and exclude unselected ledgers',async()=>{
+ const {migrateSingleLedger,createLedger,DEFAULT_LEDGER_ID}=await import('./multiLedger');
+ const {emptyLedger}=await import('./ledgerDomain');
+ const {makeConsolidatedReport,buildConsolidatedPdf}=await import('../utils/consolidatedReport');
+ const {buildConsolidatedWorkbook,consolidatedExcelBytes}=await import('../utils/consolidatedExcel');
+ const d='2026-11-27T00:00:00Z';
+ const root=createLedger(createLedger(migrateSingleLedger({ledger:emptyLedger(),draft:null},d),'Jam','#123456',d,'jam'),'Personal','#654321',d,'personal');
+ root.workspaces[0].state.ledger.expenses=[{...expense,id:'same',createdAt:d,approvedAt:d,currency:'IRT',amount:25000}];
+ root.workspaces[1].state.ledger.expenses=[{...expense,id:'same',createdAt:d,approvedAt:d,currency:'USD',amount:2,exchangeRateToToman:70000,paymentStatus:'pending'}];
+ root.workspaces[2].state.ledger.expenses=[{...expense,id:'secret',title:'PersonalSecret',createdAt:d,approvedAt:d,currency:'IRT',amount:999}];
+ const selection={ledgerIds:[DEFAULT_LEDGER_ID,'jam'],timeframe:'all' as const,query:'',paymentStatus:'all' as const,sortBy:'date_desc' as const};
+ const report=makeConsolidatedReport(root,selection,new Date(d));
+ assert.equal(report.totalIRT,165000);assert.equal(report.paidIRT,25000);assert.equal(report.remainingIRT,140000);
+ const pdf=buildConsolidatedPdf(report,'IRR');assert.equal(pdf.rows.length,4);assert.equal(pdf.headers[2],'دفتر مالی');assert.match(pdf.total,/۱,۶۵۰,۰۰۰/);assert.doesNotMatch(JSON.stringify(pdf),/PersonalSecret/);
+ const wb=buildConsolidatedWorkbook(report,'IRR');const summary=wb.Sheets['خلاصه دفاتر'],details=wb.Sheets['جزئیات اسناد'];
+ assert.equal(summary.B8.v,1650000);assert.equal(summary.B9.v,250000);assert.equal(summary.B10.v,1400000);assert.equal(summary.B8.t,'n');
+ assert.equal(Number(details.H2.v)+Number(details.H3.v),1650000);assert.doesNotMatch(JSON.stringify(wb),/PersonalSecret/);
+ const bytes=consolidatedExcelBytes(report,'IRR');assert.equal(bytes[0],80);assert.equal(bytes[1],75);
+ const pending=makeConsolidatedReport(root,{...selection,paymentStatus:'pending'},new Date(d));assert.equal(pending.count,1);assert.equal(pending.byLedger.length,2);assert.equal(pending.byLedger[0].count,0);
+ assert.throws(()=>makeConsolidatedReport(root,{...selection,dateFrom:'2026-11-28',dateTo:'2026-11-27'}),/بازه/);
+ const filtered=makeConsolidatedReport(root,{...selection,dateFrom:'2026-11-28'},new Date(d));assert.equal(filtered.count,0);
+});

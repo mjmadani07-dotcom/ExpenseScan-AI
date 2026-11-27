@@ -559,6 +559,18 @@ public class LedgerStoragePlugin extends Plugin {
         String data=call.getString("data"), name=call.getString("name"), mime=backup?"application/octet-stream":call.getString("mime");
         if(data==null||data.length()>64*1024*1024||name==null||!name.matches("[A-Za-z0-9._-]{1,100}")||mime==null||(!backup&&!mime.equals("application/json")&&!mime.equals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")&&!mime.matches("application/pdf|image/(jpeg|png|webp|gif)|text/(plain|csv)"))){call.reject("Invalid export file");return;}
         if(backup&&!name.endsWith(".esbackup")){call.reject("Invalid backup extension");return;}
+        if(!backup&&android.os.Build.VERSION.SDK_INT>=29&&mime.equals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")){
+            if(!name.endsWith(".xlsx")){call.reject("Invalid Excel extension");return;}
+            try{new Thread(()->{
+                try{
+                    byte[] bytes=Base64.decode(data,Base64.NO_WRAP);
+                    if(bytes.length<4||bytes[0]!='P'||bytes[1]!='K')throw new IllegalArgumentException("Invalid workbook");
+                    DownloadPublisher.publish(getContext().getContentResolver(),name,mime,()->new java.io.ByteArrayInputStream(bytes),bytes.length,()->sessionValid()&&foregroundForExport());
+                    call.resolve();
+                }catch(Exception ex){call.reject("ذخیره Excel ناموفق بود؛ فضای آزاد و قفل برنامه را بررسی کنید.");}
+            },"ExpenseScan-excel-download").start();}catch(Exception ex){call.reject("Cannot start Excel export");}
+            return;
+        }
         Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType(mime);intent.putExtra(Intent.EXTRA_TITLE,name);
