@@ -16,6 +16,7 @@ interface NativeLedgerBridge {
   noteActivity():Promise<void>;
   saveExportFile(options:{name:string;data:string;mime:string}):Promise<void>;
   renderReportPdf(options:{report:string}):Promise<{data:string}>;
+  saveReportPdf(options:{report:string;name:string}):Promise<{legacy:boolean}>;
   putAttachment(options:{id:string;data:string}):Promise<void>;
   readAttachment(options:{id:string}):Promise<{data:string}>;
   attachmentInventory():Promise<{items:string}>;
@@ -114,4 +115,4 @@ export async function nativeWriteStreamBackup(name:string,produce:(sink:import('
  }finally{await b.discardStreamBackup({token}).catch(()=>{});}
 }
 
-export async function nativeSaveReportPdf(name:string,report:unknown){const b=bridge();const {data}=await b.renderReportPdf({report:JSON.stringify(report)});await b.saveExportFile({name:toEnglishDigits(name),data,mime:'application/pdf'});}
+export async function nativeSaveReportPdf(name:string,report:unknown){const b=bridge(),filename=toEnglishDigits(name),payload=JSON.stringify(report);const result=await b.saveReportPdf({name:filename,report:payload});if(result.legacy){const {data}=await b.renderReportPdf({report:payload});await b.saveExportFile({name:filename,data,mime:'application/pdf'});}return result.legacy?'فایل PDF در مسیر انتخابی ذخیره شد.':'فایل PDF در Downloads/HesabYar ذخیره شد.';}

@@ -14,6 +14,6 @@ export function buildPdfReport(expenses:ExpenseRecord[],rates:ExchangeRates,unit
  return {title,scope,date:formatJalaliDate(businessDateIso()),unit:CURRENCY_LABELS[unit],count:toPersianDigits(expenses.length),total:money(total),paid:money(paid),remaining:money(remaining),rows};
 }
 export async function downloadExpensePdf(expenses:ExpenseRecord[],rates:ExchangeRates,unit:DisplayUnit,categories:CategoryDefinition[],title:string,scope:string){
- if(!window.confirm('گزارش PDF بدون رمزگذاری در مسیر انتخابی ذخیره خواهد شد. ادامه می‌دهید؟'))return;
- await nativeSaveReportPdf('hesabyar-report-'+businessDateIso()+'.pdf',buildPdfReport(expenses,rates,unit,categories,title,scope));
+ if(!window.confirm('گزارش PDF بدون رمزگذاری در Downloads/HesabYar (یا مسیر انتخابی در اندروید قدیمی) ذخیره خواهد شد. ادامه می‌دهید؟'))return;
+ return await nativeSaveReportPdf('hesabyar-report-'+businessDateIso()+'-'+Date.now()+'.pdf',buildPdfReport(expenses,rates,unit,categories,title,scope));
 }

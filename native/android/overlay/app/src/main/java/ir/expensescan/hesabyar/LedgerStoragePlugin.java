@@ -430,6 +430,16 @@ public class LedgerStoragePlugin extends Plugin {
         if(!matchesStage(call)||streamPicking||streamFile.length()<52||name==null||!name.matches("[A-Za-z0-9._-]{1,100}")||!name.endsWith(".esbackup2")){call.reject("Invalid staged backup");return;}
         try{
             try(FileOutputStream out=new FileOutputStream(streamFile,true)){out.getFD().sync();}
+            if(android.os.Build.VERSION.SDK_INT>=29){
+                final File source=streamFile;streamPicking=true;
+                new Thread(()->{
+                    boolean success=false;
+                    try{DownloadPublisher.publish(getContext().getContentResolver(),name,"application/octet-stream",()->new FileInputStream(source),source.length(),()->sessionValid()&&foregroundForExport());success=true;}
+                    catch(Exception ignored){}
+                    finally{synchronized(this){if(matchesStage(call))discardStage();}}
+                    if(success)call.resolve();else call.reject("ذخیره پشتیبان در Downloads ناموفق بود؛ فضای آزاد و قفل برنامه را بررسی کنید.");
+                },"ExpenseScan-backup-download").start();return;
+            }
             Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/octet-stream");intent.putExtra(Intent.EXTRA_TITLE,name);
             streamPicking=true;startActivityForResult(call,intent,"streamBackupResult");
         }catch(Exception ex){discardStage();call.reject("Cannot select backup destination");}
@@ -463,6 +473,21 @@ public class LedgerStoragePlugin extends Plugin {
         else call.reject("Backup copy failed; destination may contain an incomplete encrypted file. Delete it and retry.");
     }
 
+    @PluginMethod public void saveReportPdf(PluginCall call){
+        if(!requireSession(call))return;
+        final String raw=call.getString("report"),name=call.getString("name");
+        if(raw==null||raw.length()>4*1024*1024||name==null||!name.matches("[A-Za-z0-9._-]{1,100}")||!name.endsWith(".pdf")){call.reject("گزارش یا نام فایل نامعتبر است.");return;}
+        if(android.os.Build.VERSION.SDK_INT<29){JSObject result=new JSObject();result.put("legacy",true);call.resolve(result);return;}
+        try{new Thread(()->{
+            try{
+                byte[] bytes=ExpenseReportPdf.render(new JSONObject(raw));
+                if(bytes.length<64||bytes[0]!='%'||bytes[1]!='P'||bytes[2]!='D'||bytes[3]!='F'||bytes[4]!='-')throw new IllegalStateException("Invalid PDF");
+                DownloadPublisher.publish(getContext().getContentResolver(),name,"application/pdf",()->new java.io.ByteArrayInputStream(bytes),bytes.length,()->sessionValid()&&foregroundForExport());
+                JSObject result=new JSObject();result.put("legacy",false);call.resolve(result);
+            }catch(Exception ex){call.reject("ذخیره PDF ناموفق بود؛ فضای آزاد و قفل برنامه را بررسی کنید. فایل ناقص در صورت امکان پاک شد.");}
+        },"ExpenseScan-report").start();}catch(Exception ex){call.reject("شروع ساخت PDF ناموفق بود.");}
+    }
+    private synchronized boolean foregroundForExport(){return foreground;}
     @PluginMethod public void renderReportPdf(PluginCall call){
         if(!requireSession(call))return;
         final String raw=call.getString("report");
