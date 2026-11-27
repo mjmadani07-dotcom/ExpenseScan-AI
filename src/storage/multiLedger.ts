@@ -53,7 +53,7 @@ function find(root:MultiLedgerState,id:string,write=false):LedgerWorkspace{
  if(write&&w.profile.archived)throw new Error('دفتر بایگانی شده است؛ ابتدا آن را فعال کنید.');
  return w;
 }
-export function createLedger(root:MultiLedgerState,name:string,color:string,createdAt=new Date().toISOString(),id=crypto.randomUUID()):MultiLedgerState{
+export function createLedger(root:MultiLedgerState,name:string,color:string,createdAt=new Date().toISOString(),id:string=crypto.randomUUID()):MultiLedgerState{
  const next=validateMultiLedger(root);
  next.workspaces.push({profile:{id,name,color,archived:false,createdAt},state:{ledger:emptyLedger(),draft:null,recoveries:[]}});
  return validateMultiLedger(next);

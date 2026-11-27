@@ -2,12 +2,17 @@ import { assembleLedger,canonicalJson,diffLedgerRows,partitionLedger,type Ledger
 import { type AttachmentStore,type AttachmentCleanupResult,attachFile,decodeBytes,verifyAttachment } from './attachments';
 import { toEnglishDigits } from '../utils/jalali';
 import { emptyLedger } from './ledgerDomain';
+import { migrateSingleLedger,validateMultiLedger,type MultiLedgerState,type MultiLedgerStore,type LedgerProfile } from './multiLedger';
 import { decodeStoredState, type SnapshotStore, type StoredState } from './sqliteStore';
 
 interface NativeLedgerBridge {
   initialize(options:{initialPayload:string}):Promise<void>;
   read(options?:{scope:'all'|'active'}):Promise<{revision:number;schema:number;scope?:'all'|'active';payload?:string;rows?:string}>;
   commitRows(options:{revision:string;patch:string;migration:boolean}):Promise<{committed:boolean}>;
+  multiSchema():Promise<{schema:number}>;
+  migrateMulti(options:{revision:string;profile:string}):Promise<void>;
+  readMulti():Promise<{schema:number;revision:number;workspaces:string}>;
+  commitMulti(options:{revision:string;workspaces:string}):Promise<{committed:boolean}>;
   minimize():Promise<void>;
   sessionStatus():Promise<{unlocked:boolean;deviceSecure:boolean;biometricAvailable?:boolean}>;
   unlockBiometric():Promise<void>;
@@ -116,3 +121,33 @@ export async function nativeWriteStreamBackup(name:string,produce:(sink:import('
 }
 
 export async function nativeSaveReportPdf(name:string,report:unknown){const b=bridge(),filename=toEnglishDigits(name),payload=JSON.stringify(report);const result=await b.saveReportPdf({name:filename,report:payload});if(result.legacy){const {data}=await b.renderReportPdf({report:payload});await b.saveExportFile({name:filename,data,mime:'application/pdf'});}return result.legacy?'فایل PDF در مسیر انتخابی ذخیره شد.':'فایل PDF در Downloads/HesabYar ذخیره شد.';}
+
+// Opt-in adapter, deliberately not activated by AndroidAuthGate until all-ledger
+// portable backup and UI switching are ready. Never auto-migrate current users.
+export class AndroidMultiLedgerStore implements MultiLedgerStore {
+ private initialized=false;
+ async initialize(){
+   const schema=(await bridge().multiSchema()).schema;
+   if(schema!==4){
+     const legacy=new AndroidSnapshotStore();await legacy.initialize();const {revision,state}=await legacy.read();
+     const expected=migrateSingleLedger(state,new Date().toISOString());
+     await bridge().migrateMulti({revision:String(revision),profile:JSON.stringify(expected.workspaces[0].profile)});
+     const actual=await this.read();
+     if(actual.revision!==revision+1||canonicalJson(actual.state)!==canonicalJson(expected))throw new Error('تطبیق اطلاعات پس از مهاجرت ناموفق بود.');
+   }else await this.read();
+   this.initialized=true;
+ }
+ async read(){
+   const raw=await bridge().readMulti();
+   if(raw.schema!==4||!Number.isSafeInteger(raw.revision)||raw.revision<0||typeof raw.workspaces!=='string')throw new Error('نسخه دفاتر نامعتبر است.');
+   const rows=JSON.parse(raw.workspaces) as {profile:LedgerProfile;rows:LedgerRow[]}[];
+   if(!Array.isArray(rows))throw new Error('ساختار دفاتر نامعتبر است.');
+   return {revision:raw.revision,state:validateMultiLedger({version:1,workspaces:rows.map(w=>({profile:w.profile,state:assembleLedger(w.rows)}))})};
+ }
+ async compareAndSwap(revision:number,state:MultiLedgerState){
+   if(!this.initialized||!Number.isSafeInteger(revision)||revision<0)throw new Error('دفاتر هنوز آماده نیستند.');
+   const checked=validateMultiLedger(state);
+   const workspaces=checked.workspaces.map(w=>({profile:w.profile,rows:partitionLedger(w.state)}));
+   return (await bridge().commitMulti({revision:String(revision),workspaces:JSON.stringify(workspaces)})).committed===true;
+ }
+}

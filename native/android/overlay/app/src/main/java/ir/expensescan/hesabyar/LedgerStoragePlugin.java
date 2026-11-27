@@ -263,6 +263,59 @@ public class LedgerStoragePlugin extends Plugin {
         }catch(Exception ex){call.reject("SQLite transaction failed; previous committed data was preserved.");}
     }
 
+    private long multiRevision(PluginCall call){
+        String raw=call.getString("revision");
+        if(raw==null||!raw.matches("[0-9]{1,16}"))throw new IllegalArgumentException("Invalid revision");
+        long revision=Long.parseLong(raw);
+        if(revision>9007199254740990L)throw new IllegalArgumentException("Revision overflow");
+        return revision;
+    }
+    @PluginMethod public synchronized void multiSchema(PluginCall call){
+        if(!requireSession(call))return;
+        try(SQLiteDatabase db=open()){JSObject result=new JSObject();result.put("schema",db.getVersion());call.resolve(result);}
+        catch(Exception ex){call.reject("Cannot read database schema");}
+    }
+    @PluginMethod public synchronized void migrateMulti(PluginCall call){
+        if(!requireSession(call))return;
+        try(SQLiteDatabase db=open()){
+            long expected=multiRevision(call);String raw=call.getString("profile");
+            if(raw==null||raw.length()>4096)throw new IllegalArgumentException("Invalid profile");
+            db.beginTransaction();
+            try{
+                // Protect every old referenced original before any schema change.
+                for(String id:AttachmentReferences.fromRows(LedgerTables.read(db,rowCodec())))if(!attachmentExists(id))throw new IllegalStateException("Referenced attachment missing");
+                MultiLedgerTables.migrate(db,expected,new JSONObject(raw),rowCodec());
+                db.setTransactionSuccessful();
+            }finally{db.endTransaction();}
+            call.resolve();
+        }catch(Exception ex){call.reject("Multi-ledger migration failed; old database was preserved.");}
+    }
+    @PluginMethod public synchronized void readMulti(PluginCall call){
+        if(!requireSession(call))return;
+        try(SQLiteDatabase db=open()){
+            db.beginTransaction();
+            JSObject result=new JSObject();
+            try{result.put("schema",db.getVersion());result.put("revision",LedgerTables.revision(db,"ledger_revision"));result.put("workspaces",MultiLedgerTables.read(db,rowCodec()).toString());db.setTransactionSuccessful();}
+            finally{db.endTransaction();}
+            call.resolve(result);
+        }catch(Exception ex){call.reject("Multi-ledger read failed; data was preserved.");}
+    }
+    @PluginMethod public synchronized void commitMulti(PluginCall call){
+        if(!requireSession(call))return;
+        try(SQLiteDatabase db=open()){
+            long revision=multiRevision(call);String raw=call.getString("workspaces");
+            if(raw==null||raw.length()>64L*1024*1024)throw new IllegalArgumentException("Invalid catalog payload");
+            JSONArray workspaces=new JSONArray(raw);boolean committed;
+            db.beginTransaction();
+            try{
+                for(String id:MultiLedgerTables.attachments(workspaces))if(!attachmentExists(id))throw new IllegalStateException("Referenced attachment missing");
+                committed=MultiLedgerTables.commit(db,revision,workspaces,rowCodec());
+                if(committed)db.setTransactionSuccessful();
+            }finally{db.endTransaction();}
+            JSObject result=new JSObject();result.put("committed",committed);call.resolve(result);
+        }catch(Exception ex){call.reject("Multi-ledger commit failed; previous committed data was preserved.");}
+    }
+
     @PluginMethod public synchronized void loadKeys(PluginCall call) {
         if(!requireSession(call))return;
         try {
@@ -334,8 +387,9 @@ public class LedgerStoragePlugin extends Plugin {
             try(SQLiteDatabase db=open()){
                 db.beginTransaction();
                 try{
-                    if(db.getVersion()!=LedgerTables.VERSION||LedgerTables.revision(db,"ledger_revision")!=Long.parseLong(expected))throw new IllegalStateException("Ledger changed");
-                    java.util.Set<String> protectedIds=AttachmentReferences.fromRows(LedgerTables.read(db,rowCodec()));
+                    int schema=db.getVersion();
+                    if((schema!=LedgerTables.VERSION&&schema!=MultiLedgerTables.VERSION)||LedgerTables.revision(db,"ledger_revision")!=Long.parseLong(expected))throw new IllegalStateException("Ledger changed");
+                    java.util.Set<String> protectedIds=schema==MultiLedgerTables.VERSION?MultiLedgerTables.attachments(MultiLedgerTables.read(db,rowCodec())):AttachmentReferences.fromRows(LedgerTables.read(db,rowCodec()));
                     for(String id:protectedIds)if(!attachmentExists(id))throw new IllegalStateException("A referenced file is missing; cleanup refused");
                     File dir=new File(getContext().getFilesDir(),"attachments");
                     if(dir.exists()){

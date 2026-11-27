@@ -2,10 +2,12 @@ name: Android emulator smoke
 on:
   workflow_dispatch:
   push:
-    branches: [android]
+    branches: [android, android-multi-ledger]
     paths:
       - '.github/workflows/android-emulator-smoke.yml'
       - 'native/android/overlay/app/src/androidTest/**'
+      - 'native/android/overlay/app/src/main/**'
+      - 'src/storage/**'
       - 'docs/ANDROID_RELEASE_CHECKLIST.md'
       - 'scripts/prepare-android.mjs'
 permissions:
@@ -107,6 +109,12 @@ jobs:
           # after instrumentation. The exact fixture must survive until upgrade.
           adb install -r app/build/outputs/apk/debug/app-debug.apk
           adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          if [ "$GITHUB_REF_NAME" = android-multi-ledger ]; then
+            adb shell am instrument -w -e class ir.expensescan.hesabyar.MultiLedgerDeviceTest ir.expensescan.hesabyar.test/androidx.test.runner.AndroidJUnitRunner | tee /tmp/multi-ledger-result.txt
+            grep -Eq '^OK \(1 test\)' /tmp/multi-ledger-result.txt
+            ! grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' /tmp/multi-ledger-result.txt
+            exit 0
+          fi
           adb shell am instrument -w -e class 'ir.expensescan.hesabyar.LedgerDeviceTest,ir.expensescan.hesabyar.LedgerWorkflowTest#offlineInvoiceLifecycleAndPortableBackup' ir.expensescan.hesabyar.test/androidx.test.runner.AndroidJUnitRunner | tee /tmp/expensescan-e2e-result.txt
           grep -Eq '^OK \(4 tests\)' /tmp/expensescan-e2e-result.txt
           ! grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' /tmp/expensescan-e2e-result.txt
