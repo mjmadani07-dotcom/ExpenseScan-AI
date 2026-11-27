@@ -24,6 +24,7 @@ jobs:
           [[ "$code" =~ ^[1-9][0-9]{0,8}$ ]]
           test "$code" -ge 100
           echo "ANDROID_VERSION_CODE=$code" >> "$GITHUB_ENV"
+          echo "ANDROID_RELEASE_CHANNEL=beta" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -60,7 +61,7 @@ jobs:
         working-directory: .android-build/android
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleRelease
+          ./gradlew --no-daemon :app:testDebugUnitTest assembleRelease
       - name: Sign release with dedicated protected key
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -88,7 +89,7 @@ jobs:
           expected="$(printf '%s' "$EXPECTED_CERT" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
           test "$actual" = "$expected"
           "$tools/aapt" dump badging "$out" > /tmp/badging.txt
-          grep -q "package: name='ir.expensescan.hesabyar' versionCode='$ANDROID_VERSION_CODE'" /tmp/badging.txt
+          grep -q "package: name='ir.expensescan.hesabyar' versionCode='$ANDROID_VERSION_CODE' versionName='0.1.0-beta.$ANDROID_VERSION_CODE'" /tmp/badging.txt
           if grep -q application-debuggable /tmp/badging.txt; then exit 1; fi
           sha256sum "$out" > apk-output/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4

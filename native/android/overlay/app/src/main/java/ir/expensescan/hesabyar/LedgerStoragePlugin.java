@@ -245,19 +245,16 @@ public class LedgerStoragePlugin extends Plugin {
                     if(actual==revision){
                         if(migration){
                             if(deletes.length()!=0)throw new IllegalArgumentException("Invalid migration");
-                            LedgerTables.create(db,revision);
+                            // JS round-trips the validated legacy state; native migration
+                            // verifies stored rows before dropping legacy state in this transaction.
+                            LedgerTables.migrateLegacy(db,revision,upserts,rowCodec());
+                        }else{
+                            // Prevent dangling references even if cleanup happened after JS checked a file.
+                            for(String id:AttachmentReferences.fromRows(upserts))if(!attachmentExists(id))throw new IllegalStateException("Referenced attachment missing");
+                            LedgerTables.apply(db,deletes,upserts,rowCodec());
                         }
-                        // Prevent dangling references even if a cleanup happened after JS checked a file.
-                        if(!migration)for(String id:AttachmentReferences.fromRows(upserts))if(!attachmentExists(id))throw new IllegalStateException("Referenced attachment missing");
-                        LedgerTables.apply(db,deletes,upserts,rowCodec());
                         ContentValues v=new ContentValues();v.put("revision",revision+1);
                         if(db.update("ledger_revision",v,"id=1 AND revision=?",new String[]{revisionText})!=1)throw new IllegalStateException("Revision changed");
-                        if(migration){
-                            // Round-trip is checked by TypeScript before sending full migration rows.
-                            // All DDL/data writes and the legacy table removal share one transaction.
-                            LedgerTables.verifyMigration(db,upserts,rowCodec());
-                            db.execSQL("DROP TABLE ledger_state");db.setVersion(LedgerTables.VERSION);
-                        }
                         db.setTransactionSuccessful();committed=true;
                     }
                 }finally{db.endTransaction();}

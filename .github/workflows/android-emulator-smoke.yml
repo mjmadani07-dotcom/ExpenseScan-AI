@@ -1,0 +1,65 @@
+name: Android emulator smoke
+on:
+  workflow_dispatch:
+  push:
+    branches: [android]
+    paths:
+      - '.github/workflows/android-emulator-smoke.yml'
+      - 'native/android/overlay/app/src/androidTest/**'
+permissions:
+  contents: read
+concurrency:
+  group: expensescan-emulator-smoke
+  cancel-in-progress: true
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Build offline native bundle
+        env:
+          VITE_ANDROID_BUILD: 'true'
+        run: |
+          bun install --frozen-lockfile
+          bun run lint
+          bun run build
+          node scripts/prepare-android.mjs
+      - name: Prepare emulator with Android 35
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          sdkmanager --sdk_root="$ANDROID_HOME" "platform-tools" "emulator" "platforms;android-35" "build-tools;35.0.0" "system-images;android-35;google_apis;x86_64"
+          echo no | avdmanager create avd --force -n ExpenseScanCI -k "system-images;android-35;google_apis;x86_64"
+      - name: Boot emulator and run installed-app instrumentation
+        working-directory: .android-build/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/emulator/emulator" -avd ExpenseScanCI -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -memory 2048 -cores 2 > /tmp/expensescan-emulator.log 2>&1 &
+          trap 'adb emu kill >/dev/null 2>&1 || true; tail -n 40 /tmp/expensescan-emulator.log || true' EXIT
+          timeout 240 adb wait-for-device
+          for i in $(seq 1 120); do
+            if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; then break; fi
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          adb shell input keyevent 82
+          adb shell settings put global airplane_mode_on 1
+          adb shell cmd connectivity airplane-mode enable
+          adb shell svc wifi disable
+          adb shell svc data disable
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:connectedDebugAndroidTest
+          # No APK or report artifacts uploaded; this job is intentionally opt-in on test changes.

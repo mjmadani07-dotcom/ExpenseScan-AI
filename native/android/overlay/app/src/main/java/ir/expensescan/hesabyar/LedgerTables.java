@@ -68,6 +68,14 @@ final class LedgerTables {
         }
         return rows;
     }
+    static void migrateLegacy(SQLiteDatabase db,long expected,JSONArray upserts,Codec codec)throws Exception{
+        if(!db.inTransaction()||db.getVersion()!=2||revision(db,"ledger_state")!=expected)throw new IllegalStateException("Invalid migration transaction");
+        create(db,expected);
+        apply(db,new JSONArray(),upserts,codec);
+        verifyMigration(db,upserts,codec);
+        db.execSQL("DROP TABLE ledger_state");
+        db.setVersion(VERSION);
+    }
     static void verifyMigration(SQLiteDatabase db,JSONArray expected,Codec codec)throws Exception{
         JSONArray actual=read(db,codec);
         if(actual.length()!=expected.length())throw new IllegalStateException("Migration row count mismatch");

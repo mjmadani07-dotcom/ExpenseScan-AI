@@ -10,3 +10,5 @@ Do not use the ephemeral CI debug key for company deployment. Existing debug bui
 4. Test updating from one signed beta to the next without uninstalling; verify data, backups, vault and migration. Never promote a debug build or an untested beta to operational use.
 
 The workflow has not been run with real signing credentials. No key is created or stored by the assistant; this is deliberately an owner-controlled step. No automated public release is created.
+
+The signed workflow now explicitly sets channel `beta` (`0.1.0-beta.<code>`), verifies the versionName and runs native JVM regression tests before release assembly. The separate emulator smoke workflow should pass for the exact release candidate before owner approval. Do not tag or install a beta until owner-controlled signing and acceptance gates are ready.
