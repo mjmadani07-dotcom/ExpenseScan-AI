@@ -39,9 +39,11 @@ const manifest=join(target,'android/app/src/main/AndroidManifest.xml');
 let xml=readFileSync(manifest,'utf8').replace(/android:allowBackup="[^"]*"/,'android:allowBackup="false"');
 if(!xml.includes('android:allowBackup="false"'))xml=xml.replace('<application','<application android:allowBackup="false"');
 if(!xml.includes('android:usesCleartextTraffic='))xml=xml.replace('<application','<application android:usesCleartextTraffic="false"');
+if(!xml.includes('android.permission.USE_BIOMETRIC'))xml=xml.replace('</manifest>','<uses-permission android:name="android.permission.USE_BIOMETRIC" />\n</manifest>');
 writeFileSync(manifest,xml);
 const gradle=join(target,'android/app/build.gradle');
 let g=readFileSync(gradle,'utf8');
+if(!g.includes('androidx.biometric:biometric:1.1.0')){if(!/dependencies\s*\{/.test(g))throw new Error('Missing app dependencies block');g=g.replace(/dependencies\s*\{/,'dependencies {\n    implementation "androidx.biometric:biometric:1.1.0"');}
 const code=Number(process.env.ANDROID_VERSION_CODE||1);
 if(!Number.isSafeInteger(code)||code<1||code>2100000000)throw new Error('Invalid version code');
 g=g.replace(/versionCode\s+\d+/, 'versionCode '+code).replace(/versionName\s+"[^"]+"/,'versionName "0.1.0-alpha.'+code+'"');

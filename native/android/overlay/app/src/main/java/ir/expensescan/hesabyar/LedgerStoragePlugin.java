@@ -10,6 +10,9 @@ import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 import androidx.activity.result.ActivityResult;
+import androidx.biometric.BiometricManager;
+import androidx.biometric.BiometricPrompt;
+import androidx.core.content.ContextCompat;
 import com.getcapacitor.annotation.ActivityCallback;
 import java.io.OutputStream;
 import java.io.File;
@@ -61,7 +64,7 @@ public class LedgerStoragePlugin extends Plugin {
         return true;
     }
     @PluginMethod public synchronized void sessionStatus(PluginCall call){
-        JSObject r=new JSObject();r.put("unlocked",sessionValid());r.put("deviceSecure",keyguard().isDeviceSecure());call.resolve(r);
+        JSObject r=new JSObject();r.put("unlocked",sessionValid());r.put("deviceSecure",keyguard().isDeviceSecure());r.put("biometricAvailable",keyguard().isDeviceSecure()&&BiometricManager.from(getContext()).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)==BiometricManager.BIOMETRIC_SUCCESS);call.resolve(r);
     }
     @PluginMethod public synchronized void noteActivity(PluginCall call){
         if(!requireSession(call))return;
@@ -70,6 +73,35 @@ public class LedgerStoragePlugin extends Plugin {
     @PluginMethod public synchronized void lockApp(PluginCall call){unlocked=false;call.resolve();}
     @Override protected synchronized void handleOnStop(){foreground=false;stoppedAt=SystemClock.elapsedRealtime();}
     @Override protected synchronized void handleOnResume(){sessionValid();foreground=true;stoppedAt=0;}
+    @PluginMethod public synchronized void unlockBiometric(PluginCall call){
+        if(authPending){call.reject("Authentication already in progress");return;}
+        if(!keyguard().isDeviceSecure()||BiometricManager.from(getContext()).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)!=BiometricManager.BIOMETRIC_SUCCESS){
+            call.reject("Strong biometric authentication unavailable; use device credential","BIOMETRIC_UNAVAILABLE");return;
+        }
+        authPending=true;
+        getActivity().runOnUiThread(()->{
+            try{
+                BiometricPrompt prompt=new BiometricPrompt(getActivity(),ContextCompat.getMainExecutor(getContext()),new BiometricPrompt.AuthenticationCallback(){
+                    @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result){
+                        synchronized(LedgerStoragePlugin.this){
+                            if(!authPending)return;
+                            authPending=false;
+                            if(!keyguard().isDeviceSecure()||!foreground){unlocked=false;call.reject("Authentication session expired");return;}
+                            unlocked=true;lastActivity=SystemClock.elapsedRealtime();stoppedAt=0;call.resolve();
+                        }
+                    }
+                    @Override public void onAuthenticationError(int code,CharSequence message){
+                        synchronized(LedgerStoragePlugin.this){
+                            if(!authPending)return;
+                            authPending=false;unlocked=false;
+                            call.reject("Biometric authentication ended; use device credential if needed","BIOMETRIC_FAILED");
+                        }
+                    }
+                });
+                prompt.authenticate(new BiometricPrompt.PromptInfo.Builder().setTitle("حساب‌یار").setSubtitle("ورود امن با حسگر بیومتریک دستگاه").setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG).setNegativeButtonText("انصراف").build());
+            }catch(Exception ex){synchronized(LedgerStoragePlugin.this){authPending=false;unlocked=false;call.reject("Biometric prompt unavailable");}}
+        });
+    }
     @PluginMethod public synchronized void unlockApp(PluginCall call){
         if(authPending){call.reject("Authentication already in progress");return;}
         if(!keyguard().isDeviceSecure()){call.reject("Set a secure screen lock in Android settings first","NO_DEVICE_LOCK");return;}

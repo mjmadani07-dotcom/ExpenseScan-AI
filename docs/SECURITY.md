@@ -33,3 +33,5 @@ Originals: distinct Keystore AES-GCM alias; SHA-256 verified on write/read; immu
 Schema v3 row payloads retain AES-GCM encryption and authenticate row identity/table/parent inside the sealed envelope. SQLite identifiers, relationships and row counts are not encrypted; no plaintext amount/vendor columns. Migration is transactional and logical deletion does not ensure physical erasure. Real-device validation remains required.
 
 Direct AI tests use only synthetic receipt text and the selected model; user confirms destination host. Android requests require HTTPS and reject redirects. Provider response bodies are not surfaced in errors. No live provider credentials or financial documents were used in CI. Test success does not establish vision capability or guarantee provider data privacy.
+
+Biometric login uses the AndroidX system prompt with BIOMETRIC_STRONG, no custom fingerprint or face matching, and preserves a separate system credential login. This is an application session gate, not per-use biometric-bound encryption keys. Sensitive bridge logging is disabled via Capacitor loggingBehavior none; debug APKs remain test-only.

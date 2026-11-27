@@ -9,7 +9,8 @@ interface NativeLedgerBridge {
   read():Promise<{revision:number;schema:number;payload?:string;rows?:string}>;
   commitRows(options:{revision:string;patch:string;migration:boolean}):Promise<{committed:boolean}>;
   minimize():Promise<void>;
-  sessionStatus():Promise<{unlocked:boolean;deviceSecure:boolean}>;
+  sessionStatus():Promise<{unlocked:boolean;deviceSecure:boolean;biometricAvailable?:boolean}>;
+  unlockBiometric():Promise<void>;
   unlockApp():Promise<void>;
   lockApp():Promise<void>;
   noteActivity():Promise<void>;
@@ -71,7 +72,7 @@ export async function nativeSaveKey(provider:string,value:string){return JSON.pa
 export async function nativeSaveBackup(name:string,data:string){await bridge().saveBackupFile({name,data});}
 
 export const nativeSessionStatus=()=>bridge().sessionStatus();
-export const nativeUnlock=()=>bridge().unlockApp();
+export const nativeUnlock=(biometric=false)=>biometric?bridge().unlockBiometric():bridge().unlockApp();
 export const nativeLock=()=>bridge().lockApp();
 export const nativeActivity=()=>bridge().noteActivity();
 export async function nativeExportFile(name:string,data:Uint8Array,mime:string){

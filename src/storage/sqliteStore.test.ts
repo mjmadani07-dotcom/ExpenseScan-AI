@@ -234,3 +234,11 @@ test('AI connection probe uses only synthetic data and respects custom endpoint 
  await assert.rejects(()=>testAiConnection(params),e=>e instanceof Error&&!e.message.includes('secret echoed')&&e.message.includes('400'));
  }finally{globalThis.fetch=previous;}
 });
+
+test('Android authentication bridge selects explicit biometric or system credential entry',async()=>{
+ const {nativeUnlock,nativeSessionStatus}=await import('./androidSnapshotStore');
+ const g=globalThis as any,previous=g.Capacitor;const calls:string[]=[];
+ try{g.Capacitor={getPlatform:()=> 'android',Plugins:{LedgerStorage:{async unlockApp(){calls.push('credential');},async unlockBiometric(){calls.push('biometric');},async sessionStatus(){return {unlocked:false,deviceSecure:true,biometricAvailable:true};}}}};
+ assert.equal((await nativeSessionStatus()).biometricAvailable,true);await nativeUnlock(true);await nativeUnlock();assert.deepEqual(calls,['biometric','credential']);
+ }finally{if(previous===undefined)delete g.Capacitor;else g.Capacitor=previous;}
+});
