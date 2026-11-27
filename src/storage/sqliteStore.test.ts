@@ -479,3 +479,35 @@ test('consolidated reporting selects only requested ledgers and uses per-documen
  assert.throws(()=>consolidateLedgers(root,['missing']),/یافت نشد/);
  assert.throws(()=>consolidateLedgers(root,[DEFAULT_LEDGER_ID,'jam'],{...DEFAULT_EXPENSE_FILTERS,category:'operations'}),/تفکیک/);
 });
+
+test('workspace session refuses overlapping catalog operations and closes only persisted draft scope',async()=>{
+ const {MultiLedgerSession}=await import('./multiLedgerSession');
+ const {migrateSingleLedger,createLedger,DEFAULT_LEDGER_ID,validateMultiLedger}=await import('./multiLedger');
+ const {emptyLedger}=await import('./ledgerDomain');
+ const d='2026-11-27T00:00:00Z';
+ let state=createLedger(migrateSingleLedger({ledger:emptyLedger(),draft:null},d),'Jam','#123456',d,'jam'),revision=0;
+ const store={initialize:async()=>{},read:async()=>({revision,state:structuredClone(state)}),compareAndSwap:async(expected:number,next:typeof state)=>{if(expected!==revision)return false;state=validateMultiLedger(next);revision++;return true;}};
+ const session=new MultiLedgerSession(store);
+ assert.equal((await session.catalog()).length,2);
+ const karaj=await session.open(DEFAULT_LEDGER_ID);
+ await assert.rejects(()=>session.open('jam'),/خارج شوید/);
+ await assert.rejects(()=>session.edit('jam',{name:'New'}),/خارج شوید/);
+ const draft={id:'karaj-draft',drafts:[{...expense,tempId:'x',selected:true}],previewPages:[]};
+ const saving=karaj.repository.saveDraft(draft);
+ await assert.rejects(()=>session.close(draft),/پایان ذخیره/);await saving;
+ await assert.rejects(()=>session.close(null),/یکسان نیست/);
+ await session.close(draft);
+ await assert.rejects(()=>karaj.repository.add([expense]),/نشست/);
+ const jam=await session.open('jam');assert.equal(await jam.repository.loadDraft(),null);
+ await jam.repository.add([expense]);await session.close(null);
+ const reopened=await session.open(DEFAULT_LEDGER_ID);assert.deepEqual(await reopened.repository.loadDraft(),draft);assert.equal((await reopened.repository.load()).expenses.length,0);
+ session.dispose();await assert.rejects(()=>reopened.repository.add([expense]),/نشست/);
+ await assert.rejects(()=>session.catalog(),/نشست/);
+});
+test('workspace catalog renders explicit ledger labels and scoped draft indicators',async()=>{
+ const React=await import('react'),{renderToStaticMarkup}=await import('react-dom/server'),{LedgerCatalog}=await import('../components/MultiLedgerWorkspace');
+ const d='2026-11-27T00:00:00Z';
+ const items=[{profile:{id:'karaj',name:'دفتر کرج',color:'#0f766e',archived:false,createdAt:d},count:2,hasDraft:true},{profile:{id:'jam',name:'دفتر جم',color:'#2563eb',archived:false,createdAt:d},count:1,hasDraft:false},{profile:{id:'personal',name:'شخصی',color:'#475569',archived:true,createdAt:d},count:4,hasDraft:false}];
+ const html=renderToStaticMarkup(React.createElement(LedgerCatalog,{items,busy:false,error:'',onOpen:()=>{},onCreate:()=>{},onEdit:()=>{},onLock:()=>{},onRefresh:()=>{}}));
+ assert.match(html,/دفتر کرج/);assert.match(html,/دفتر جم/);assert.match(html,/پیش‌نویس ذخیره‌شده/);assert.doesNotMatch(html,/شخصی/);assert.match(html,/ورود به دفتر/);
+});

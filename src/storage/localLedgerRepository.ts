@@ -10,6 +10,10 @@ export class LocalLedgerRepository implements LedgerRepository {
   readonly mode='local' as const;
   private queue:Promise<unknown>=Promise.resolve();
   private disposed=false;
+  private pending=0;
+  get hasPendingWork(){return this.pending>0;}
+  closeIfIdle(){if(this.hasPendingWork)return false;this.dispose();return true;}
+  private track<T>(task:Promise<T>):Promise<T>{this.pending++;const tracked=task.finally(()=>{this.pending--;});this.queue=tracked;return tracked;}
   dispose(){this.disposed=true;}
   private assertOpen(){if(this.disposed)throw new Error('نشست دفتر پایان یافته است؛ دوباره وارد شوید.');}
   constructor(private readonly store:SnapshotStore,private readonly attachments?:AttachmentStore){}
@@ -31,8 +35,7 @@ export class LocalLedgerRepository implements LedgerRepository {
       if(!await this.store.compareAndSwap(revision,state))throw new Error('دفتر هم‌زمان تغییر کرده است؛ دوباره بارگذاری کنید.');
       return result;
     });
-    this.queue=task;
-    return task;
+    return this.track(task);
   }
   saveDraft(draft:DraftSession|null){return this.change(async(_d,s)=>{if(draft){const existing=new Set(attachmentIds(s.draft?.drafts??[]));await this.ensureAttachments(attachmentIds(draft.drafts).filter(id=>!existing.has(id)));}if(draft&&s.lastApproval?.id===draft.id)throw new Error('این پیش‌نویس قبلاً ثبت شده است. دفتر را دوباره بارگذاری کنید.');s.draft=draft?structuredClone(draft):null;});}
   add(items:ExpenseFields[],draftId?:string){
@@ -72,7 +75,7 @@ export class LocalLedgerRepository implements LedgerRepository {
   }
   exportStreamBackup(password:string,sink:ByteSink,progress?:Progress,signal?:AbortSignal){
     const task=this.queue.catch(()=>{}).then(async()=>{const s=await this.active();return writeStreamBackup({ledger:s.ledger,draft:s.draft},password,this.attachments,async bytes=>{this.assertOpen();await sink(bytes);this.assertOpen();},progress,signal);});
-    this.queue=task;return task;
+    return this.track(task);
   }
   restoreStreamBackup(file:Blob,password:string,progress?:Progress,signal?:AbortSignal){
     return this.change(async(d,s)=>{
@@ -87,7 +90,7 @@ export class LocalLedgerRepository implements LedgerRepository {
     const task=this.queue.catch(()=>{}).then(async()=>{
       if(!this.attachments?.cleanup)throw new Error('پاک‌سازی در این دستگاه در دسترس نیست.');
       this.assertOpen();const {revision}=await this.store.read();this.assertOpen();return this.attachments.cleanup(revision);
-    });this.queue=task;return task;
+    });return this.track(task);
   }
   async attachmentAudit(){await this.queue.catch(()=>{});this.assertOpen();if(!this.attachments?.inventory)throw new Error('فهرست فایل‌های اصلی در دسترس نیست.');const s=(await this.store.read()).state;return auditAttachmentInventory(await this.attachments.inventory(),s);}
   async recoveryList(){await this.queue.catch(()=>{});this.assertOpen();return ((await this.store.read()).state.recoveries??[]).map(r=>({id:r.id,createdAt:r.createdAt,count:r.ledger.expenses.length}));}

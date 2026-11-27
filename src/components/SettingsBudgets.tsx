@@ -1,3 +1,4 @@
+import { useWorkspaceBusy } from './WorkspaceActivity';
 import { testAiConnection } from '../utils/clientAiExtract';
 import { isAndroidRuntime } from '../storage/androidSnapshotStore';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -158,6 +159,7 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
   const [deletingCatId, setDeletingCatId] = useState<string | null>(null);
   const [reassignTargetId, setReassignTargetId] = useState<string>('');
   const [catMutationBusy, setCatMutationBusy] = useState(false);
+  useWorkspaceBusy(saving||testing||isSavingKey||isClearing||catMutationBusy);
   const [catError, setCatError] = useState<string | null>(null);
 
   const categoryUsageCounts = useMemo(() => {

@@ -124,6 +124,7 @@ export async function nativeSaveReportPdf(name:string,report:unknown){const b=br
 
 // Opt-in adapter, deliberately not activated by AndroidAuthGate until all-ledger
 // portable backup and UI switching are ready. Never auto-migrate current users.
+export const nativeLedgerSchema=async()=>(await bridge().multiSchema()).schema;
 export class AndroidMultiLedgerStore implements MultiLedgerStore {
  private initialized=false;
  async initialize(){

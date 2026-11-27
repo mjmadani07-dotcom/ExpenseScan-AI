@@ -1,3 +1,4 @@
+import { useWorkspaceBusy } from './WorkspaceActivity';
 import { isAndroidRuntime,nativeExportAttachment } from '../storage/androidSnapshotStore';
 import { AttachmentViewer } from './AttachmentViewer';
 import { businessDateIso } from '../utils/jalali';
@@ -128,6 +129,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
   const [isExportingPdf,setIsExportingPdf]=useState(false);
   const [pdfNotice,setPdfNotice]=useState('');
   const [isMutating, setIsMutating] = useState(false);
+  useWorkspaceBusy(isMutating||isExportingPdf||isExportingExcel||isClearingSamples);
   const [rateDraft, setRateDraft] = useState<number>(0);
   const [isEditingTranches, setIsEditingTranches] = useState(false);
   const [isEditingFull, setIsEditingFull] = useState(false);

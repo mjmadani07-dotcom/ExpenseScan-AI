@@ -1,3 +1,4 @@
+import { useWorkspaceBusy } from './WorkspaceActivity';
 import React, { useMemo, useState } from 'react';
 import {isAndroidRuntime} from '../storage/androidSnapshotStore';
 import {
@@ -83,6 +84,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
   const activeCategories = useMemo(() => resolveCategories(categories), [categories]);
   const [timeframe, setTimeframe] = useState<TimeframeFilter>('6m');
   const [pdfBusy,setPdfBusy]=useState(false),[pdfError,setPdfError]=useState(''),[pdfNotice,setPdfNotice]=useState('');
+  useWorkspaceBusy(pdfBusy);
   const [selectedCategory, setSelectedCategory] = useState<ExpenseCategory | 'all'>('all');
   const [hoveredMonthKey, setHoveredMonthKey] = useState<string | null>(null);
 

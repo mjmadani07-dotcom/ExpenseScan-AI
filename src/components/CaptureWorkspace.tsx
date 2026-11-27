@@ -1,3 +1,4 @@
+import { useWorkspaceBusy } from './WorkspaceActivity';
 import { nativeAttachFile } from '../storage/androidSnapshotStore';
 import { businessDateIso } from '../utils/jalali';
 import React, { useEffect, useRef, useState } from 'react';
@@ -110,6 +111,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   const [quickKeyInput, setQuickKeyInput] = useState('');
   const [showQuickKeyText, setShowQuickKeyText] = useState(false);
   const [isSavingEndpoint, setIsSavingEndpoint] = useState(false);
+  useWorkspaceBusy(isProcessing||isSavingEndpoint);
 
   useEffect(() => {
     setSelectedAi(aiConfig);

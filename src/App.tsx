@@ -1,4 +1,6 @@
 import { BackupPanel } from './components/BackupPanel';
+import { useWorkspaceActivity } from './components/WorkspaceActivity';
+import type { LedgerProfile } from './storage/multiLedger';
 import { minimizeAndroid } from './storage/androidSnapshotStore';
 import { WebLedgerRepository, type LedgerRepository, type DraftSession } from './storage/ledgerRepository';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -58,7 +60,10 @@ const CACHE_KEY = 'hesabyar_ledger_cache_v1';
 const DISPLAY_UNIT_KEY = 'hesabyar_display_unit_v1';
 
 const webRepository = new WebLedgerRepository();
-export default function App({ repository = webRepository, onLock }: { repository?: LedgerRepository; onLock?:()=>void }) {
+export default function App({ repository = webRepository, onLock,workspace }: { repository?: LedgerRepository; onLock?:()=>void; workspace?:{profile:LedgerProfile;onExit:(draft:DraftSession|null)=>Promise<void>} }) {
+  const activity=useWorkspaceActivity();
+  const [leaving,setLeaving]=useState(false),[leaveError,setLeaveError]=useState('');
+  const leavingRef=useRef(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit>(() => {
     try {
@@ -424,23 +429,34 @@ export default function App({ repository = webRepository, onLock }: { repository
   useEffect(()=>{
     if(repository.mode!=='local')return;
     const back=()=>{
-      if(isSavingBatch)return;
+      if(isSavingBatch||leavingRef.current||activity?.isBusy())return;
       if(selectedExpense){setSelectedExpense(null);return;}
       if(activeTab!=='overview'){setActiveTab('overview');return;}
       void minimizeAndroid().catch(()=>{});
     };
     window.addEventListener('expensescan-native-back',back);
     return ()=>window.removeEventListener('expensescan-native-back',back);
-  },[repository,selectedExpense,activeTab,isSavingBatch]);
+  },[repository,selectedExpense,activeTab,isSavingBatch,activity]);
 
   const navigateTab = (tab: ActiveTab) => {
     // Preserve reviewed/paid AI drafts while navigating between tabs.
-    if (isSavingBatch) return;
+    if (isSavingBatch||leavingRef.current||activity?.isBusy()) return;
     setActiveTab(tab);
   };
 
+  const leave=async()=>{
+    if(!workspace||activeTab!=='overview'||isLoading||isSavingBatch||leavingRef.current||activity?.isBusy())return;
+    leavingRef.current=true;setLeaving(true);setLeaveError('');
+    try{await workspace.onExit(draftRef.current);}catch(e){setLeaveError(e instanceof Error?e.message:'خروج از دفتر ناموفق بود.');}
+    finally{leavingRef.current=false;setLeaving(false);}
+  };
+  const scopeBanner=workspace?<div className="min-w-0 flex items-center gap-2 flex-1">
+    <span aria-hidden="true" className="w-3 h-3 rounded-full shrink-0" style={{backgroundColor:workspace.profile.color}}/>
+    <div className="min-w-0 flex-1"><span className="block text-[10px] text-slate-500">دفتر فعال</span><span className="block text-sm font-bold truncate" title={workspace.profile.name}>{workspace.profile.name}</span></div>
+    <button type="button" disabled={activeTab!=='overview'||isLoading||isSavingBatch||leaving||activity?.busy} onClick={()=>void leave()} className="min-h-10 px-2 rounded-lg border bg-white text-xs shrink-0 disabled:opacity-40" title="برای تغییر دفتر به نمای کلی بازگردید">تغییر دفتر</button>
+  </div>:null;
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900" inert={leaving||undefined}>
       {/* Desktop Top Navigation (Strict 3-zone contract) */}
       <header className="hidden md:flex sticky top-0 z-30 h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 px-6 lg:px-10 items-center justify-between gap-8">
         <a
@@ -453,6 +469,7 @@ export default function App({ repository = webRepository, onLock }: { repository
         >
           حساب‌یار
         </a>
+        {workspace&&scopeBanner}
 
         <nav aria-label="منوی اصلی" className="flex items-center gap-7 text-sm font-medium">
           <button
@@ -519,7 +536,7 @@ export default function App({ repository = webRepository, onLock }: { repository
 
       {/* Mobile Compact Sticky Top Bar (56px) */}
       <header className="md:hidden sticky top-0 z-30 h-14 shrink-0 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 flex items-center justify-between gap-3">
-        <span className="text-base font-bold text-slate-900 truncate">حساب‌یار</span>
+        {workspace?scopeBanner:<span className="text-base font-bold text-slate-900 truncate">حساب‌یار</span>}
         {repository.mode==='web' && <PWAInstallButton compact />}
         {onLock&&<button type="button" onClick={onLock} className="min-h-10 px-3 text-xs border rounded-lg">قفل</button>}
       </header>
@@ -537,6 +554,9 @@ export default function App({ repository = webRepository, onLock }: { repository
 
       {/* Main Content Area */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-6 pb-24 md:pb-10">
+        {leaveError&&<p role="alert" className="mb-3 rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-800">{leaveError}</p>}
+        {workspace&&activeTab==='capture'&&<p className="mb-3 rounded-xl bg-teal-50 border border-teal-200 p-3 text-sm text-teal-900">ثبت سند در دفتر: <strong>{workspace.profile.name}</strong></p>}
+        {workspace&&activeTab!=='overview'&&<p className="mb-3 text-xs text-slate-500">برای تغییر دفتر، پس از پایان عملیات به نمای کلی بازگردید.</p>}
         {isLoading ? (
           <div className="space-y-4">
             <div className="h-8 w-56 rounded-lg bg-slate-200 animate-pulse" />
@@ -649,7 +669,7 @@ export default function App({ repository = webRepository, onLock }: { repository
               <>
               <SettingsBudgets
                 localMode={repository.mode==='local'}
-                securityContent={<>{onLock && <button type="button" onClick={onLock} className="w-full bg-slate-900 text-white rounded-xl p-3 text-sm">قفل فوری برنامه</button>}{repository.exportBackup && <BackupPanel repository={repository} onRestored={loadLedger}/>}</>}
+                securityContent={<>{onLock && <button type="button" onClick={onLock} className="w-full bg-slate-900 text-white rounded-xl p-3 text-sm">قفل فوری برنامه</button>}{workspace?<p className="text-xs text-amber-800">پشتیبان‌گیری کامل چنددفتره هنوز در حال توسعه است؛ این محیط فقط برای آزمون داخلی است.</p>:repository.exportBackup && <BackupPanel repository={repository} onRestored={loadLedger}/>}</>}
                 displayUnit={displayUnit}
                 categories={activeCategories}
                 budgets={ledger.budgets}
