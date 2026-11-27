@@ -6,6 +6,9 @@ interface NativeLedgerBridge {
   read():Promise<{revision:number;payload:string}>;
   compareAndSwap(options:{revision:string;payload:string}):Promise<{committed:boolean}>;
   minimize():Promise<void>;
+  loadKeys():Promise<{keys:string}>;
+  saveKey(options:{provider:string;value:string}):Promise<{keys:string}>;
+  saveBackupFile(options:{name:string;data:string}):Promise<void>;
 }
 type Runtime = {getPlatform?:()=>string;isNativePlatform?:()=>boolean;Plugins?:{LedgerStorage?:NativeLedgerBridge}};
 function runtime():Runtime|undefined {
@@ -33,3 +36,7 @@ export class AndroidSnapshotStore implements SnapshotStore {
     return (await bridge().compareAndSwap({revision:String(revision),payload})).committed===true;
   }
 }
+
+export async function nativeLoadKeys(){return JSON.parse((await bridge().loadKeys()).keys);}
+export async function nativeSaveKey(provider:string,value:string){return JSON.parse((await bridge().saveKey({provider,value})).keys);}
+export async function nativeSaveBackup(name:string,data:string){await bridge().saveBackupFile({name,data});}

@@ -106,3 +106,19 @@ test('Android bridge uses exact revision string, validates snapshots and fails c
     await assert.rejects(()=>store.read(),/اندروید/);
   } finally {if(previous===undefined)delete global.Capacitor;else global.Capacitor=previous;}
 });
+
+test('encrypted portable backup rejects wrong passwords and tampering; excludes AI configuration',async()=>{
+ const {encryptBackup,decryptBackup}=await import('./portableBackup');
+ const db=new DatabaseSync(':memory:');try{
+ const repo=new LocalLedgerRepository(new SqliteSnapshotStore(driver(db)));await repo.initialize();await repo.add([expense]);
+ const snapshot=await repo.exportBackup();const text=await encryptBackup(snapshot,'a strong test password');
+ assert.equal(text.includes('Vendor'),false);
+ const restored=await decryptBackup(text,'a strong test password');assert.equal(restored.ledger.expenses[0].amount,12345);assert.equal(restored.ledger.aiConfig,undefined);
+ await assert.rejects(()=>decryptBackup(text,'wrong password'),/گذرواژه/);
+ const broken=JSON.parse(text);broken.ciphertext=(broken.ciphertext[0]==='A'?'B':'A')+broken.ciphertext.slice(1);
+ await assert.rejects(()=>decryptBackup(JSON.stringify(broken),'a strong test password'),/گذرواژه/);
+ await repo.clear('all');assert.equal((await repo.load()).expenses.length,0);assert.equal((await repo.recoveryInfo())?.count,1);
+ await repo.restoreRecovery();assert.equal((await repo.load()).expenses.length,1);
+ await repo.clear('all');await repo.restoreBackup(restored);assert.equal((await repo.load()).expenses.length,1);
+ }finally{db.close();}
+});

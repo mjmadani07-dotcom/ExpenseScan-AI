@@ -1,3 +1,4 @@
+import { cleanBackup, type BackupSnapshot } from './portableBackup';
 import type { AiConfig,CategoryBudget,ExchangeRates,ExpenseFields,ExpenseRecord,JsonImportMode } from '../types/expense';
 import { LedgerDomain } from './ledgerDomain';
 import type { DraftSession,LedgerRepository } from './ledgerRepository';
@@ -35,11 +36,16 @@ export class LocalLedgerRepository implements LedgerRepository {
     });
   }
   update(id:string,patch:Partial<ExpenseFields>){return this.change(d=>{const record=d.updateExpense(id,patch);if(!record)throw new Error('سند یافت نشد.');return record;});}
-  remove(id:string){return this.change(d=>{if(!d.deleteExpense(id))throw new Error('سند یافت نشد.');});}
+  remove(id:string){return this.change((d,s)=>{this.checkpoint(s);if(!d.deleteExpense(id))throw new Error('سند یافت نشد.');});}
   settings(budgets:CategoryBudget[],rates:ExchangeRates,aiConfig:AiConfig){return this.change(d=>d.updateSettings({budgets,rates,aiConfig}));}
-  import(data:unknown,mode:JsonImportMode){return this.change(d=>d.importLedgerOnServer(data,mode));}
-  clear(scope:'samples'|'all'){return this.change(d=>d.clearExpensesOnServer(scope));}
+  import(data:unknown,mode:JsonImportMode){return this.change((d,s)=>{this.checkpoint(s);return d.importLedgerOnServer(data,mode);});}
+  clear(scope:'samples'|'all'){return this.change((d,s)=>{this.checkpoint(s);return d.clearExpensesOnServer(scope);});}
   addCategory(input:Parameters<LedgerDomain['addCategoryOnServer']>[0]){return this.change(d=>d.addCategoryOnServer(input));}
   updateCategory(id:string,patch:Parameters<LedgerDomain['updateCategoryOnServer']>[1]){return this.change(d=>{const result=d.updateCategoryOnServer(id,patch);if(!result)throw new Error('دسته‌بندی یافت نشد.');return result;});}
-  deleteCategory(id:string,reassignToId?:string){return this.change(d=>d.deleteCategoryOnServer(id,reassignToId));}
+  deleteCategory(id:string,reassignToId?:string){return this.change((d,s)=>{this.checkpoint(s);return d.deleteCategoryOnServer(id,reassignToId);});}
+  private checkpoint(s:StoredState){s.recovery={createdAt:new Date().toISOString(),ledger:structuredClone(s.ledger),draft:structuredClone(s.draft)};}
+  async exportBackup(){await this.queue.catch(()=>{});const s=(await this.store.read()).state;return cleanBackup({ledger:s.ledger,draft:s.draft});}
+  async recoveryInfo(){await this.queue.catch(()=>{});const r=(await this.store.read()).state.recovery;return r?{createdAt:r.createdAt,count:r.ledger.expenses.length}:null;}
+  restoreBackup(snapshot:BackupSnapshot){const clean=cleanBackup(snapshot);return this.change((d,s)=>{this.checkpoint(s);d.ledger={...clean.ledger,aiConfig:d.ledger.aiConfig};s.draft=clean.draft;s.lastApproval=undefined;});}
+  restoreRecovery(){return this.change((d,s)=>{const r=s.recovery;if(!r)throw new Error('نسخه بازیابی موجود نیست.');this.checkpoint(s);d.ledger=r.ledger;s.draft=r.draft;s.lastApproval=undefined;});}
 }

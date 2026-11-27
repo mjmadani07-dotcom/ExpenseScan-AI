@@ -1,3 +1,4 @@
+import { BackupPanel } from './components/BackupPanel';
 import { minimizeAndroid } from './storage/androidSnapshotStore';
 import { WebLedgerRepository, type LedgerRepository, type DraftSession } from './storage/ledgerRepository';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -149,7 +150,7 @@ export default function App({ repository = webRepository }: { repository?: Ledge
 
   useEffect(() => {
     loadLedger();
-    loadLocalApiKeys().then(setLocalApiKeys).catch(() => {});
+    loadLocalApiKeys().then(setLocalApiKeys).catch(() => showToast('خطا در خواندن کلیدهای دستگاه؛ کلیدهای موجود حذف نشده‌اند.'));
   }, [loadLedger]);
 
   const handleSaveLocalApiKey = async (provider: AiProviderId, key: string) => {
@@ -626,6 +627,8 @@ export default function App({ repository = webRepository }: { repository?: Ledge
             )}
 
             {activeTab === 'settings' && (
+              <>
+              {repository.exportBackup && <BackupPanel repository={repository} onRestored={loadLedger}/>}
               <SettingsBudgets
                 displayUnit={displayUnit}
                 categories={activeCategories}
@@ -644,6 +647,7 @@ export default function App({ repository = webRepository }: { repository?: Ledge
                 onSaveSettings={handleSaveSettings}
                 onImportJson={handleImportJson}
               />
+              </>
             )}
           </>
         )}

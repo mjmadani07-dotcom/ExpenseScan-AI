@@ -234,7 +234,7 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
       await onSaveLocalApiKey(localAiConfig.provider, trimmed);
       setKeyInput('');
       setShowKey(false);
-    } finally {
+    } catch (err) { setSaveError(err instanceof Error ? err.message : 'خطا در ذخیره کلید'); } finally {
       setIsSavingKey(false);
     }
   };
@@ -244,7 +244,7 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
     try {
       await onRemoveLocalApiKey(localAiConfig.provider);
       setKeyInput('');
-    } finally {
+    } catch (err) { setSaveError(err instanceof Error ? err.message : 'خطا در حذف کلید'); } finally {
       setIsSavingKey(false);
     }
   };

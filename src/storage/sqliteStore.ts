@@ -16,6 +16,7 @@ export interface StoredState {
   ledger:LedgerData;
   draft:DraftSession|null;
   lastApproval?:{id:string; records:LedgerData['expenses']};
+  recovery?:{createdAt:string;ledger:LedgerData;draft:DraftSession|null};
 }
 export interface VersionedState { revision:number; state:StoredState; }
 export interface SnapshotStore {
@@ -31,6 +32,7 @@ export function decodeStoredState(raw:string):StoredState {
   const validated=parseAndValidateLedgerImport(state.ledger);
   if(state.draft!==null&&(!state.draft||typeof state.draft.id!=='string'||!Array.isArray(state.draft.drafts)||!Array.isArray(state.draft.previewPages)))throw new Error('پیش‌نویس ذخیره‌شده نامعتبر است.');
   if(state.lastApproval&&(!state.lastApproval.id||!Array.isArray(state.lastApproval.records)))throw new Error('شناسه تأیید نامعتبر است.');
+  if(state.recovery){const r=state.recovery;if(typeof r.createdAt!=='string'||!r.ledger||!('draft' in r))throw new Error('پشتیبان داخلی نامعتبر است.');decodeStoredState(JSON.stringify({ledger:r.ledger,draft:r.draft}));}
   return {...state,ledger:{...state.ledger,...validated,aiConfig:sanitizeAiConfig(state.ledger.aiConfig)}};
 }
 

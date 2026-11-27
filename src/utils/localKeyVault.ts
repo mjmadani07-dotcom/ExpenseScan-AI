@@ -1,3 +1,4 @@
+import { isAndroidRuntime, nativeLoadKeys, nativeSaveKey } from '../storage/androidSnapshotStore';
 import type { AiProviderId } from '../types/expense';
 
 const DB_NAME = 'hesabyar_secure_vault_v1';
@@ -89,6 +90,7 @@ async function persistMap(map: Partial<Record<AiProviderId, string>>): Promise<v
 }
 
 export async function loadLocalApiKeys(): Promise<Partial<Record<AiProviderId, string>>> {
+  if (isAndroidRuntime()) return nativeLoadKeys();
   if (
     typeof indexedDB === 'undefined' ||
     typeof crypto === 'undefined' ||
@@ -129,6 +131,7 @@ export async function saveLocalApiKey(
   provider: AiProviderId,
   apiKey: string
 ): Promise<Partial<Record<AiProviderId, string>>> {
+  if (isAndroidRuntime()) return nativeSaveKey(provider, apiKey.trim());
   const current = await loadLocalApiKeys();
   const trimmed = apiKey.trim();
   const next: Partial<Record<AiProviderId, string>> = { ...current };

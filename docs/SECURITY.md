@@ -18,3 +18,6 @@ Unauthenticated /api ledger and extraction routes; missing extraction rate limit
 ## Operational boundaries
 
 Offline use does not require login to a remote service. Online provider reachability and CORS/native HTTP integration must be tested independently. Device-key mode cannot guarantee immunity to runtime compromise and must comply with provider terms. Do not store financial documents in public directories by default; export only at user request. Data loss on uninstall is possible without an external recoverable backup.
+
+## Implemented phase 4 controls
+Android native payload and API key map have distinct AES-GCM Keystore aliases; no plaintext fallback. Keys are not included in portable backup. Device key loss requires external encrypted backup; native schema 1 migration does not guarantee physical erasure of old pages. Portable backups use user password, random salt and IV, PBKDF2-SHA256 600k and authenticated encryption. One rotating internal recovery checkpoint (not independent backup) is retained. The app still has no PIN/biometric gate; credentials are accessible to running app JavaScript and direct provider calls; verify provider endpoint before use. Native hardware security/restore has not yet been device tested.
