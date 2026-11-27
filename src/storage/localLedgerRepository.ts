@@ -32,7 +32,18 @@ export class LocalLedgerRepository implements LedgerRepository {
   saveDraft(draft:DraftSession|null){return this.change(async(_d,s)=>{if(draft){const existing=new Set(attachmentIds(s.draft?.drafts??[]));await this.ensureAttachments(attachmentIds(draft.drafts).filter(id=>!existing.has(id)));}if(draft&&s.lastApproval?.id===draft.id)throw new Error('این پیش‌نویس قبلاً ثبت شده است. دفتر را دوباره بارگذاری کنید.');s.draft=draft?structuredClone(draft):null;});}
   add(items:ExpenseFields[],draftId?:string){
     return this.change(async(d,s)=>{
-      if(draftId&&s.lastApproval?.id===draftId)return s.lastApproval.records;
+      if(draftId&&s.lastApproval?.id===draftId){
+        // A lost response must not recreate or return stale/deleted documents.
+        const previous=s.lastApproval.records;
+        if(!previous.length||previous.length!==items.length)throw new Error('این پیش‌نویس قبلاً ثبت شده است؛ تعداد اسناد متفاوت است. دفتر را دوباره بارگذاری کنید.');
+        const current=new Map(d.ledger.expenses.map(x=>[x.id,x]));
+        const records=previous.map(old=>{
+          const live=current.get(old.id);
+          if(!live||live.createdAt!==old.createdAt||live.approvedAt!==old.approvedAt)throw new Error('این پیش‌نویس قبلاً ثبت شده و بعضی اسناد تغییر هویت داده یا حذف شده‌اند. دفتر را دوباره بارگذاری کنید.');
+          return live;
+        });
+        return records;
+      }
       if(draftId&&s.draft?.id!==draftId)throw new Error('پیش‌نویس تغییر کرده یا موجود نیست.');
       if(!items.length)throw new Error('سند انتخاب نشده است.');
       await this.ensureAttachments(attachmentIds(items));

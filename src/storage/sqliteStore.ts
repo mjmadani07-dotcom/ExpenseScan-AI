@@ -34,7 +34,10 @@ export function decodeStoredState(raw:string):StoredState {
   if(!state||!state.ledger||!Array.isArray(state.ledger.expenses)||!Array.isArray(state.ledger.budgets)||!Array.isArray(state.ledger.categories)||!state.ledger.rates||!('draft' in state))throw new Error('پایگاه داده نامعتبر است؛ بازیابی لازم است.');
   const validated=parseAndValidateLedgerImport(state.ledger);
   if(state.draft!==null&&(!state.draft||typeof state.draft.id!=='string'||!Array.isArray(state.draft.drafts)||!Array.isArray(state.draft.previewPages)))throw new Error('پیش‌نویس ذخیره‌شده نامعتبر است.');
-  if(state.lastApproval&&(!state.lastApproval.id||!Array.isArray(state.lastApproval.records)))throw new Error('شناسه تأیید نامعتبر است.');
+  if(state.lastApproval){
+    const approval=state.lastApproval;
+    if(typeof approval.id!=='string'||!approval.id||!Array.isArray(approval.records)||!approval.records.length||approval.records.some(r=>!r||typeof r.id!=='string'||!r.id)||new Set(approval.records.map(r=>r.id)).size!==approval.records.length)throw new Error('شناسه تأیید نامعتبر است.');
+  }
   if(state.recoveries!==undefined&&(!Array.isArray(state.recoveries)||state.recoveries.length>3))throw new Error('آرشیو بازیابی نامعتبر است.');
   const recoveries=state.recoveries??(state.recovery?[{...state.recovery,id:'legacy-'+state.recovery.createdAt}]:[]);
   const ids=new Set<string>();

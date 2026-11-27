@@ -352,3 +352,33 @@ test('attachment viewer verifies original bytes and never treats text as HTML',a
  const scale=boundedPdfScale(50000,50000);assert.ok(scale*50000<=2400&&scale*scale*50000*50000<=4_000_001);
  assert.throws(()=>boundedPdfScale(0,100));
 });
+
+
+test('approval replay returns current values and rejects deleted records without recreating them',async()=>{
+ const db=new DatabaseSync(':memory:');try{
+ const store=new SqliteSnapshotStore(driver(db)),repo=new LocalLedgerRepository(store);await repo.initialize();
+ const draft={id:'retry-draft',drafts:[{...expense,tempId:'a',selected:true},{...expense,tempId:'b',selected:true}],previewPages:[]};
+ await repo.saveDraft(draft);
+ const [first,second]=await repo.add([expense,expense],draft.id);
+ await repo.update(first.id,{amount:54321});
+ assert.equal((await repo.add([expense,expense],draft.id))[0].amount,54321);
+ assert.equal((await repo.load()).expenses.length,2);
+ await assert.rejects(()=>repo.add([expense],draft.id),/تعداد/);
+ await assert.rejects(()=>repo.saveDraft(draft),/قبلاً/);
+ await repo.remove(second.id);
+ await assert.rejects(()=>repo.add([expense,expense],draft.id),/حذف/);
+ assert.equal((await repo.load()).expenses.length,1);assert.equal(await repo.loadDraft(),null);
+ }finally{db.close();}
+});
+test('simultaneous repeated approval and simulated lost acknowledgement do not duplicate expenses',async()=>{
+ const db=new DatabaseSync(':memory:');try{
+ const store=new SqliteSnapshotStore(driver(db));let loseReply=false;
+ const original=store.compareAndSwap.bind(store);
+ store.compareAndSwap=async(revision,state)=>{const ok=await original(revision,state);if(ok&&loseReply){loseReply=false;throw new Error('simulated lost acknowledgement');}return ok;};
+ const repo=new LocalLedgerRepository(store);await repo.initialize();
+ const draft={id:'lost-reply',drafts:[{...expense,tempId:'a',selected:true}],previewPages:[]};await repo.saveDraft(draft);
+ loseReply=true;await assert.rejects(()=>repo.add([expense],draft.id),/lost acknowledgement/);
+ const [a,b]=await Promise.all([repo.add([expense],draft.id),repo.add([expense],draft.id)]);
+ assert.equal(a[0].id,b[0].id);assert.equal((await repo.load()).expenses.length,1);assert.equal(await repo.loadDraft(),null);
+ }finally{db.close();}
+});

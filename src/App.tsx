@@ -84,6 +84,7 @@ export default function App({ repository = webRepository, onLock }: { repository
   const draftRef = useRef<DraftSession | null>(null);
   const [previewPages, setPreviewPages] = useState<string[]>([]);
   const [isSavingBatch, setIsSavingBatch] = useState(false);
+  const approvalInFlight=useRef(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const [ledgerCategoryFilter, setLedgerCategoryFilter] = useState<ExpenseCategory | 'all'>('all');
@@ -170,6 +171,7 @@ export default function App({ repository = webRepository, onLock }: { repository
   };
 
   const persistDraft = (session:DraftSession|null) => {
+    if(approvalInFlight.current)return;
     draftRef.current=session;
     setPendingDrafts(session?.drafts ?? null);
     setPreviewPages(session?.previewPages ?? []);
@@ -189,6 +191,7 @@ export default function App({ repository = webRepository, onLock }: { repository
     persistDraft({...draftRef.current,drafts});
   };
   const handleDiscardDrafts = async () => {
+    if(approvalInFlight.current)return;
     if (!window.confirm('پیش‌نویس‌ها حذف شوند؟')) return;
     try {
       if (repository.saveDraft) await repository.saveDraft(null);
@@ -197,20 +200,30 @@ export default function App({ repository = webRepository, onLock }: { repository
   };
 
   const handleApproveBatch = async (approvedItems: ExpenseFields[]) => {
+    if(approvalInFlight.current)return;
+    approvalInFlight.current=true;
     setIsSavingBatch(true);
     setSaveError(null);
     try {
       const session = draftRef.current;
-      if (repository.saveDraft && session) await repository.saveDraft(session);
+      // Local queued edits precede approval. Do not write an already-approved
+      // draft back to storage on retry after a lost response.
+      if(repository.mode==='local'&&!session)throw new Error('پیش‌نویس فعال موجود نیست؛ دفتر را دوباره بارگذاری کنید.');
       const created = await repository.add(approvedItems, session?.id);
       if (!Array.isArray(created) || created.length !== approvedItems.length) throw new Error('پاسخ ثبت سند نامعتبر است؛ قبل از تلاش مجدد دفتر را بررسی کنید.');
 
-      setLedger((prev) => {
-        const createdIds = new Set(created.map(item=>item.id));
-        const next = { ...prev, expenses: [...created, ...prev.expenses.filter(item=>!createdIds.has(item.id))] };
-        saveCache(next);
-        return next;
-      });
+      if(repository.mode==='local'){
+        // Reload authoritative order and values. If reload fails, retry uses
+        // the committed approval token rather than creating duplicate records.
+        setLedger(await repository.load());
+      }else{
+        setLedger((prev) => {
+          const createdIds = new Set(created.map(item=>item.id));
+          const next = { ...prev, expenses: [...created, ...prev.expenses.filter(item=>!createdIds.has(item.id))] };
+          saveCache(next);
+          return next;
+        });
+      }
       draftRef.current=null;
       setPendingDrafts(null);
       setPreviewPages([]);
@@ -221,6 +234,7 @@ export default function App({ repository = webRepository, onLock }: { repository
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'خطا در ثبت نهایی');
     } finally {
+      approvalInFlight.current=false;
       setIsSavingBatch(false);
     }
   };
