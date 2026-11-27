@@ -8,7 +8,7 @@ const LIMIT=32*1024*1024;
 const label='ExpenseScan portable backup v1';
 const enc=new TextEncoder();
 function b64(bytes:Uint8Array){let out='';for(let i=0;i<bytes.length;i+=16384)out+=String.fromCharCode(...bytes.subarray(i,i+16384));return btoa(out);}
-function unb64(s:string){return Uint8Array.from(atob(s),c=>c.charCodeAt(0));}
+function unb64(s:string){const raw=atob(s),bytes=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);return bytes;}
 async function key(password:string,salt:Uint8Array<ArrayBuffer>){
  const material=await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveKey']);
  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:ITERATIONS,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);

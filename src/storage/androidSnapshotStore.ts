@@ -94,13 +94,14 @@ export const androidAttachments:AttachmentStore={
 export const nativeAttachFile=(file:File,kind:'image'|'pdf'|'text_file')=>attachFile(androidAttachments,file,kind);
 export async function nativeExportAttachment(id:string,mime:string){const data=decodeBytes(await androidAttachments.get(id));const ext:Record<string,string>={'application/pdf':'pdf','image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/gif':'gif','text/plain':'txt','text/csv':'csv'};if(!ext[mime])throw new Error('نوع پیوست نامعتبر است.');await nativeExportFile('attachment-'+id.slice(0,12)+'.'+ext[mime],data,mime);}
 
-export async function nativeWriteStreamBackup(name:string,produce:(sink:import('./streamBackup').ByteSink)=>Promise<number>){
+export async function nativeWriteStreamBackup(name:string,produce:(sink:import('./streamBackup').ByteSink)=>Promise<number>,signal?:AbortSignal){
  const b=bridge();const {token}=await b.beginStreamBackup();
  try{
   await produce(async bytes=>{
     // Bridge only handles 1 MiB of encrypted bytes per call.
-    for(let i=0;i<bytes.length;i+=1048576){let raw='';const chunk=bytes.subarray(i,i+1048576);for(let j=0;j<chunk.length;j+=16384)raw+=String.fromCharCode(...chunk.subarray(j,j+16384));await b.appendStreamBackup({token,data:btoa(raw)});}
+    for(let i=0;i<bytes.length;i+=1048576){if(signal?.aborted)throw new Error('عملیات پشتیبان‌گیری لغو شد.');let raw='';const chunk=bytes.subarray(i,i+1048576);for(let j=0;j<chunk.length;j+=16384)raw+=String.fromCharCode(...chunk.subarray(j,j+16384));await b.appendStreamBackup({token,data:btoa(raw)});}
   });
+  if(signal?.aborted)throw new Error('عملیات پشتیبان‌گیری لغو شد.');
   await b.finishStreamBackup({token,name:toEnglishDigits(name)});
  }finally{await b.discardStreamBackup({token}).catch(()=>{});}
 }

@@ -35,7 +35,7 @@ export async function writeStreamBackup(snapshot:BackupManifest,password:string,
  if(ids.length&&!store)throw new Error('محل نگهداری پیوست در دسترس نیست.');
  const header=new Uint8Array(HEADER_SIZE);header.set(MAGIC);header.set(crypto.getRandomValues(new Uint8Array(24)),8);
  const raw=enc.encode(JSON.stringify(manifest));if(raw.length>MANIFEST_LIMIT)throw new Error('حجم اطلاعات مالی از ظرفیت فعلی بیشتر است.');
- const key=await derive(password,header);let size=0,index=0;
+ checkAbort(signal);const key=await derive(password,header);let size=0,index=0;
  const write=async(bytes:Uint8Array<ArrayBuffer>)=>{checkAbort(signal);size+=bytes.length;if(size>STREAM_BACKUP_LIMIT)throw new Error('حجم پشتیبان از سقف ۵۱۲ مگابایت بیشتر است.');await sink(bytes);};
  const frame=async(data:Uint8Array<ArrayBuffer>)=>{checkAbort(signal);const length=data.length+16;const cipher=new Uint8Array(await crypto.subtle.encrypt(params(header,index++,length),key,data));await write(u32(length));await write(cipher);};
  await write(header);await frame(raw);progress?.({done:0,total:ids.length});

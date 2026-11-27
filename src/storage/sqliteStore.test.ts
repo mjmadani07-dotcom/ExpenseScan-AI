@@ -275,3 +275,34 @@ test('stream backup authenticates ordered frames, stages attachments separately,
  await repo.restoreStreamBackup(file,pass);assert.equal((await repo.load()).expenses[0].id,'one');
  }finally{db.close();}
 });
+
+
+test('stream backup exceeds legacy aggregate capacity without aggregating original files',async()=>{
+ const {writeStreamBackup,readStreamBackup}=await import('./streamBackup');
+ const {encodeBytes,digestBytes}=await import('./attachments');
+ const {emptyLedger}=await import('./ledgerDomain');
+ const {openAsBlob}=await import('node:fs');const {open}=await import('node:fs/promises');
+ const bytesPerFile=9*1024*1024,date='2026-11-27T00:00:00Z',ledger=emptyLedger();
+ const make=(i:number)=>{const a=new Uint8Array(bytesPerFile);a[0]=i+1;a[a.length-1]=255-i;return a;};
+ const ids:string[]=[];for(let i=0;i<4;i++){const id=await digestBytes(make(i));ids.push(id);ledger.expenses.push({...expense,id:'large-'+i,createdAt:date,approvedAt:date,attachmentId:id,attachmentMime:'application/pdf'});}
+ const dir=mkdtempSync(join(tmpdir(),'expensescan-stream-')),path=join(dir,'large.esbackup2'),handle=await open(path,'w');
+ try{
+  let maxFrame=0;const progress:number[]=[];const pass='test long password 123';
+  const size=await writeStreamBackup({ledger,draft:null},pass,{async get(id){return encodeBytes(make(ids.indexOf(id)));}},async bytes=>{maxFrame=Math.max(maxFrame,bytes.length);let offset=0;while(offset<bytes.length){const result=await handle.write(bytes,offset,bytes.length-offset);if(!result.bytesWritten)throw Error('short write');offset+=result.bytesWritten;}},p=>progress.push(p.done));
+  await handle.close();
+  assert.ok(size>32*1024*1024);assert.ok(maxFrame<=bytesPerFile+16);assert.deepEqual(progress,[0,1,2,3,4]);
+  const restoredIds:string[]=[];const file=await openAsBlob(path);
+  const restored=await readStreamBackup(file,pass,{async put(id,data){const {verifyAttachment}=await import('./attachments');await verifyAttachment(id,data);restoredIds.push(id);}});
+  assert.equal(restored.ledger.expenses.length,4);assert.deepEqual(restoredIds,ids.slice().sort());
+ }finally{await handle.close().catch(()=>{});rmSync(dir,{recursive:true,force:true});}
+});
+test('native stream backup staging splits binary data into bounded chunks and discards on failure',async()=>{
+ const {nativeWriteStreamBackup}=await import('./androidSnapshotStore');
+ const g=globalThis as any,previous=g.Capacitor;const calls:string[]=[];const lens:number[]=[];
+ try{
+ g.Capacitor={getPlatform:()=> 'android',Plugins:{LedgerStorage:{async beginStreamBackup(){calls.push('begin');return {token:'stage'};},async appendStreamBackup(v:any){assert.equal(v.token,'stage');lens.push(atob(v.data).length);},async finishStreamBackup(v:any){calls.push('finish');assert.equal(v.name,'ExpenseScan.esbackup2');},async discardStreamBackup(){calls.push('discard');}}}};
+ await nativeWriteStreamBackup('ExpenseScan.esbackup2',async sink=>{await sink(new Uint8Array(2*1048576+3));return 2*1048576+3;});
+ assert.deepEqual(lens,[1048576,1048576,3]);assert.deepEqual(calls,['begin','finish','discard']);
+ calls.length=0;await assert.rejects(()=>nativeWriteStreamBackup('ExpenseScan.esbackup2',async()=>{throw Error('failed');}),/failed/);assert.deepEqual(calls,['begin','discard']);
+ }finally{if(previous===undefined)delete g.Capacitor;else g.Capacitor=previous;}
+});
