@@ -463,6 +463,16 @@ public class LedgerStoragePlugin extends Plugin {
         else call.reject("Backup copy failed; destination may contain an incomplete encrypted file. Delete it and retry.");
     }
 
+    @PluginMethod public void renderReportPdf(PluginCall call){
+        if(!requireSession(call))return;
+        final String raw=call.getString("report");
+        if(raw==null||raw.length()>4*1024*1024){call.reject("Report too large; narrow the filters");return;}
+        try{
+            byte[] bytes=ExpenseReportPdf.render(new JSONObject(raw));
+            if(!requireSession(call))return;
+            JSObject result=new JSObject();result.put("data",Base64.encodeToString(bytes,Base64.NO_WRAP));call.resolve(result);
+        }catch(Exception e){call.reject("ساخت PDF ناموفق بود؛ بازه گزارش یا طول متن اسناد را کاهش دهید.");}
+    }
     @PluginMethod public void saveBackupFile(PluginCall call) {saveExport(call,true);}
     @PluginMethod public void saveExportFile(PluginCall call) {saveExport(call,false);}
     private void saveExport(PluginCall call,boolean backup) {

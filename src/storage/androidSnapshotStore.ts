@@ -15,6 +15,7 @@ interface NativeLedgerBridge {
   lockApp():Promise<void>;
   noteActivity():Promise<void>;
   saveExportFile(options:{name:string;data:string;mime:string}):Promise<void>;
+  renderReportPdf(options:{report:string}):Promise<{data:string}>;
   putAttachment(options:{id:string;data:string}):Promise<void>;
   readAttachment(options:{id:string}):Promise<{data:string}>;
   attachmentInventory():Promise<{items:string}>;
@@ -112,3 +113,5 @@ export async function nativeWriteStreamBackup(name:string,produce:(sink:import('
   await b.finishStreamBackup({token,name:toEnglishDigits(name)});
  }finally{await b.discardStreamBackup({token}).catch(()=>{});}
 }
+
+export async function nativeSaveReportPdf(name:string,report:unknown){const b=bridge();const {data}=await b.renderReportPdf({report:JSON.stringify(report)});await b.saveExportFile({name:toEnglishDigits(name),data,mime:'application/pdf'});}

@@ -46,6 +46,8 @@ import { JsonSyncPanel } from './JsonSyncPanel';
 import { PWAInstallButton } from './PWAInstallButton';
 
 interface SettingsBudgetsProps {
+  localMode?: boolean;
+  securityContent?: React.ReactNode;
   categories: CategoryDefinition[];
   budgets: CategoryBudget[];
   rates: ExchangeRates;
@@ -108,6 +110,8 @@ const FALLBACK_PROVIDERS = [
 ];
 
 export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
+  localMode=false,
+  securityContent,
   categories,
   budgets,
   rates,
@@ -125,6 +129,8 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
   onSaveSettings,
   onImportJson,
 }) => {
+  const [section,setSection]=useState<string|null>(null);
+  const group=(id:string,title:string,description:string,content:React.ReactNode)=> <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden"><button type="button" aria-expanded={section===id} aria-controls={'settings-'+id} onClick={()=>setSection(v=>v===id?null:id)} className="flex w-full text-right items-center justify-between gap-3 min-h-16 p-4"><span><span className="block text-sm font-bold text-slate-900">{title}</span><span className="block text-xs text-slate-500 mt-1">{description}</span></span><span aria-hidden="true" className="text-teal-700 text-lg">{section===id?'−':'+'}</span></button><div id={'settings-'+id} hidden={section!==id} className="border-t p-3 space-y-3">{content}</div></section>;
   const activeCategories = useMemo(() => resolveCategories(categories), [categories]);
   const [localBudgets, setLocalBudgets] = useState<CategoryBudget[]>(budgets);
   const [localRates, setLocalRates] = useState<ExchangeRates>(rates);
@@ -429,10 +435,10 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900">
-            بودجه‌بندی، هوش مصنوعی و همگام‌سازی
+            تنظیمات حساب‌یار
           </h1>
           <p className="mt-1 text-sm text-slate-600">
-            سرویس استخراج هوشمند، Base URL، بودجه حوزه‌ها، نرخ ارز و ورود/خروجی JSON را مدیریت کنید.
+            موضوع موردنظر را انتخاب کنید. تغییرات بودجه، نرخ ارز و سرویس هوش مصنوعی را با دکمه ذخیره تنظیمات ثبت کنید.
           </p>
         </div>
 
@@ -456,8 +462,9 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
         </div>
       )}
 
+      {localMode && group('security','امنیت و پشتیبان‌گیری','قفل برنامه، نسخه‌های بازیابی و فایل پشتیبان',securityContent)}
       {/* Multi-AI Provider Settings */}
-      <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
+      {group("ai","هوش مصنوعی","مدل، آدرس اتصال و کلید API",(<section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
             <Cpu className="w-5 h-5" />
@@ -675,10 +682,10 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
             </div>
           </div>
         </div>
-      </section>
+      </section>))}
 
       {/* JSON Export & Import (Merge / Replace) */}
-      <section className="rounded-2xl bg-white border border-slate-200 p-5">
+      {group("data","ورود و خروج اطلاعات","فایل JSON؛ بدون اصل پیوست‌ها",(<section className="rounded-2xl bg-white border border-slate-200 p-5">
         <JsonSyncPanel
           expenses={expenses}
           categories={activeCategories}
@@ -686,10 +693,10 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
           rates={rates}
           onImportJson={onImportJson}
         />
-      </section>
+      </section>))}
 
       {/* Clear Sample / Seed Data & Start Fresh */}
-      <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
+      {group("cleanup","مدیریت داده‌ها","پاکسازی نمونه‌ها یا حذف اسناد",(<section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
             <AlertTriangle className="w-5 h-5" />
@@ -763,10 +770,10 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
             </button>
           </div>
         )}
-      </section>
+      </section>))}
 
       {/* Android PWA Card */}
-      <section className="rounded-2xl bg-white border border-slate-200 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      {!localMode && group("install","نصب نسخه وب","فقط در مرورگر",(<section className="rounded-2xl bg-white border border-slate-200 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-start gap-3">
           <div className="w-11 h-11 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
             <Smartphone className="w-6 h-6" />
@@ -781,10 +788,10 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
         <div className="shrink-0">
           <PWAInstallButton />
         </div>
-      </section>
+      </section>))}
 
       {/* Exchange Rates */}
-      <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
+      {group("rates","نرخ ارز","نرخ پیش‌فرض اسناد ارزی",(<section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
         <div>
           <h2 className="text-base font-bold text-slate-900">نرخ پیش‌فرض تسعیر ارزهای خارجی ({CURRENCY_LABELS[displayUnit]})</h2>
           <p className="mt-1 text-xs text-slate-500">
@@ -823,10 +830,10 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
             />
           </div>
         </div>
-      </section>
+      </section>))}
 
       {/* Category Management & Monthly Budgets */}
-      <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-5">
+      {group("categories","دسته‌بندی و بودجه","حوزه‌های هزینه و سقف ماهانه",(<section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-5">
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
             <Tags className="w-5 h-5" />
@@ -1162,7 +1169,7 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
             );
           })}
         </div>
-      </section>
+      </section>))}
     </form>
   );
 };

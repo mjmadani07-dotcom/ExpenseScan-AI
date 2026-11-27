@@ -191,6 +191,7 @@ public class LedgerWorkflowTest {
             assertEquals(id,record(app,EDITED,23456).getString("id"));
             eval(app,"document.querySelector('button[aria-label=\"بستن جزئیات سند\"]').click()");
             nav(app,"تنظیمات");
+            String security="document.querySelector(\'button[aria-controls=settings-security]\')";waitFor(app,security,"Security settings missing");eval(app,"("+security+").click()");
             String passwordSelector="section input[autocomplete=new-password]";
             field(app,passwordSelector,PASSWORD);
             // Each password is in a different label; target the second via the input collection.
@@ -207,6 +208,7 @@ public class LedgerWorkflowTest {
             nav(app,"هزینه‌ها");openRecord(app,EDITED);click(app,"حذف سند");click(app,"حذف قطعی شود");
             waitFor(app,"!document.querySelector('#expense-detail-title')","Delete did not close detail");record(app,null,0);
             nav(app,"تنظیمات");
+            waitFor(app,security,"Security settings missing");eval(app,"("+security+").click()");
             // Wrong password must reject the actual exported archive without restoring data.
             field(app,passwordSelector,"wrong password");
             file(app,"input[type=file][accept*='.esbackup']","backup.esbackup2","application/octet-stream",encoded);

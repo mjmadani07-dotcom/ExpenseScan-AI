@@ -93,9 +93,31 @@ public class LedgerDeviceTest {
             }
         }finally{ctx.deleteDatabase(name);if(ks.containsAlias(alias))ks.deleteEntry(alias);}
     }
+    @Test public void nativePdfHasMultiplePagesAndCanRender()throws Exception{
+        Context ctx=ApplicationProvider.getApplicationContext();
+        JSONArray rows=new JSONArray();for(int i=0;i<60;i++)rows.put(new JSONArray().put("۱۴۰۵/۰۸/۲۷").put("خرید تجهیزات\nفروشنده نمونه").put("عملیات").put("۱۲٬۳۴۵ تومان").put("۲٬۰۰۰ تومان").put("۱۰٬۳۴۵ تومان").put("ناقص"));
+        JSONObject report=new JSONObject().put("title","گزارش دفتر هزینه‌ها").put("scope","آزمون فارسی").put("date","۱۴۰۵/۰۸/۲۷").put("unit","تومان").put("count","۶۰").put("total","۷۴۰٬۷۰۰ تومان").put("paid","۱۲۰٬۰۰۰ تومان").put("remaining","۶۲۰٬۷۰۰ تومان").put("rows",rows);
+        byte[] data=ExpenseReportPdf.render(report);
+        assertEquals("%PDF-",new String(data,0,5,StandardCharsets.US_ASCII));
+        java.io.File file=java.io.File.createTempFile("report-test",".pdf",ctx.getCacheDir());
+        try{
+            try(java.io.FileOutputStream out=new java.io.FileOutputStream(file)){out.write(data);}
+            try(android.os.ParcelFileDescriptor fd=android.os.ParcelFileDescriptor.open(file,android.os.ParcelFileDescriptor.MODE_READ_ONLY);
+                android.graphics.pdf.PdfRenderer renderer=new android.graphics.pdf.PdfRenderer(fd)){
+                assertTrue(renderer.getPageCount()>1);
+                try(android.graphics.pdf.PdfRenderer.Page page=renderer.openPage(0)){
+                    android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(842,595,android.graphics.Bitmap.Config.ARGB_8888);
+                    page.render(bitmap,null,null,android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                    boolean hasTeal=false;for(int y=25;y<300&&!hasTeal;y++)if(bitmap.getPixel(25,y)==android.graphics.Color.rgb(15,118,110))hasTeal=true;assertTrue("Report table header rendered",hasTeal);
+                    bitmap.recycle();
+                }
+            }
+        }finally{file.delete();}
+    }
     @Test public void installedAppStartsAtSecureLockScreen()throws Exception{
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
             scenario.onActivity(activity->assertTrue((activity.getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_SECURE)!=0));
+            scenario.onActivity(activity->{android.view.View root=activity.findViewById(android.R.id.content);androidx.core.view.WindowInsetsCompat insets=androidx.core.view.ViewCompat.getRootWindowInsets(root);assertNotNull(insets);androidx.core.graphics.Insets bars=insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars()|androidx.core.view.WindowInsetsCompat.Type.displayCutout());assertTrue(root.getPaddingTop()>=bars.top);assertTrue(root.getPaddingBottom()>=bars.bottom);});
             boolean locked=false;
             for(int i=0;i<30&&!locked;i++){
                 CountDownLatch latch=new CountDownLatch(1);AtomicReference<String> result=new AtomicReference<>();

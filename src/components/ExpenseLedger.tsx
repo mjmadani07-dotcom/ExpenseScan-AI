@@ -125,6 +125,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
   const [confirmRemovePreview, setConfirmRemovePreview] = useState(false);
   const [viewOriginal,setViewOriginal]=useState<string|null>(null);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [isExportingPdf,setIsExportingPdf]=useState(false);
   const [isMutating, setIsMutating] = useState(false);
   const [rateDraft, setRateDraft] = useState<number>(0);
   const [isEditingTranches, setIsEditingTranches] = useState(false);
@@ -220,6 +221,12 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
     setFilters({ ...DEFAULT_EXPENSE_FILTERS });
   };
 
+  const handleExportPdf=async()=>{
+    setIsExportingPdf(true);
+    try{const {downloadExpensePdf}=await import('../utils/pdfReport');await downloadExpensePdf(filtered,rates,displayUnit,activeCategories,'گزارش دفتر هزینه‌ها','تمام اسناد مطابق فیلترهای جاری دفتر (نه فقط صفحه فعلی)');}
+    catch(err){setMutationError(err instanceof Error?err.message:'خطا در ذخیره PDF');}
+    finally{setIsExportingPdf(false);}
+  };
   const handleExportExcel = async () => {
     setIsExportingExcel(true);
     try {
@@ -371,6 +378,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
             <Download className="w-4 h-4 text-teal-700" />
             <span>{isExportingExcel ? 'در حال ساخت اکسل...' : 'خروجی اکسل (.xlsx)'}</span>
           </button>
+          {isAndroidRuntime()&&<button type="button" onClick={()=>void handleExportPdf()} disabled={!filtered.length||isExportingPdf||isExportingExcel} className="min-h-11 px-4 rounded-xl border border-slate-200 bg-white text-xs font-semibold disabled:opacity-40">{isExportingPdf?'در حال ساخت PDF…':'خروجی گزارش PDF'}</button>}
         </div>
       </div>
 

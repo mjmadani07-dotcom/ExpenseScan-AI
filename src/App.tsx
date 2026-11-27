@@ -518,7 +518,7 @@ export default function App({ repository = webRepository, onLock }: { repository
       </header>
 
       {/* Mobile Compact Sticky Top Bar (56px) */}
-      <header className="md:hidden sticky top-0 z-30 h-14 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 flex items-center justify-between gap-3">
+      <header className="md:hidden sticky top-0 z-30 h-14 shrink-0 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 flex items-center justify-between gap-3">
         <span className="text-base font-bold text-slate-900 truncate">حساب‌یار</span>
         {repository.mode==='web' && <PWAInstallButton compact />}
         {onLock&&<button type="button" onClick={onLock} className="min-h-10 px-3 text-xs border rounded-lg">قفل</button>}
@@ -647,9 +647,9 @@ export default function App({ repository = webRepository, onLock }: { repository
 
             {activeTab === 'settings' && (
               <>
-              {onLock && <button type="button" onClick={onLock} className="block w-full max-w-4xl mx-auto mb-3 bg-slate-900 text-white rounded-xl p-3 text-sm">قفل فوری برنامه</button>}
-              {repository.exportBackup && <BackupPanel repository={repository} onRestored={loadLedger}/>}
               <SettingsBudgets
+                localMode={repository.mode==='local'}
+                securityContent={<>{onLock && <button type="button" onClick={onLock} className="w-full bg-slate-900 text-white rounded-xl p-3 text-sm">قفل فوری برنامه</button>}{repository.exportBackup && <BackupPanel repository={repository} onRestored={loadLedger}/>}</>}
                 displayUnit={displayUnit}
                 categories={activeCategories}
                 budgets={ledger.budgets}
@@ -676,7 +676,7 @@ export default function App({ repository = webRepository, onLock }: { repository
       {/* Mobile Fixed Bottom Thumb-Zone Tab Bar (64px) */}
       <nav
         aria-label="ناوبری موبایل"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 grid grid-cols-4 h-16 pb-safe"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 grid grid-cols-4 h-16"
       >
         <button
           type="button"

@@ -403,3 +403,7 @@ test('disposing local repository rejects queued and in-flight writes before comm
  await assert.rejects(()=>repo.load(),/نشست/);
  }finally{db.close();}
 });
+
+test('PDF report uses shared historical FX and payment totals in the selected unit',async()=>{
+ const {buildPdfReport}=await import('../utils/pdfReport');const {emptyLedger}=await import('./ledgerDomain');const base=emptyLedger();const d='2026-11-27T00:00:00Z';const records=[{...expense,id:'r',createdAt:d,approvedAt:d,amount:12345,currency:'IRT' as const,paymentStatus:'paid' as const}];const report=buildPdfReport(records,base.rates,'IRR',base.categories??[],'گزارش','فیلتر');assert.equal(report.rows.length,1);assert.equal(report.total,report.paid);assert.equal(report.rows[0][3],report.total);assert.match(report.total,/۱۲۳,۴۵۰/);assert.match(report.remaining,/۰ ریال/);
+});
