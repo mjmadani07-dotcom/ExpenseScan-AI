@@ -1,7 +1,8 @@
+import { snapshotAttachmentIds,verifyAttachment,decodeBytes } from './attachments';
 import type { LedgerData } from '../types/expense';
 import type { DraftSession } from './ledgerRepository';
 import { decodeStoredState } from './sqliteStore';
-export interface BackupSnapshot { ledger:LedgerData; draft:DraftSession|null; }
+export interface BackupSnapshot { ledger:LedgerData; draft:DraftSession|null; attachments?:Record<string,string>; }
 const ITERATIONS=600000;
 const LIMIT=32*1024*1024;
 const label='ExpenseScan portable backup v1';
@@ -17,11 +18,15 @@ export function cleanBackup(snapshot:BackupSnapshot):BackupSnapshot{
  // No provider secrets, URLs or prior approval tokens in portable backups.
  const validated=decodeStoredState(JSON.stringify({ledger,draft:snapshot.draft}));
  const {aiConfig:_default,...clean}=validated.ledger;
- return {ledger:clean,draft:validated.draft};
+ const ids=snapshotAttachmentIds(clean,validated.draft), blobs=snapshot.attachments??{};
+ if(!blobs||typeof blobs!=='object'||Array.isArray(blobs)||Object.keys(blobs).length!==ids.length)throw new Error('مجموعه پیوست‌های فایل پشتیبان کامل نیست.');
+ for(const id of ids){if(!Object.hasOwn(blobs,id))throw new Error('پیوست در فایل پشتیبان موجود نیست.');decodeBytes(blobs[id]);}
+ return {ledger:clean,draft:validated.draft,...(ids.length?{attachments:blobs}:{})};
 }
 export async function encryptBackup(snapshot:BackupSnapshot,password:string):Promise<string>{
  if(password.length<12)throw new Error('گذرواژه پشتیبان باید حداقل ۱۲ نویسه باشد.');
- const raw=enc.encode(JSON.stringify(cleanBackup(snapshot)));
+ const clean=cleanBackup(snapshot);for(const [id,data] of Object.entries(clean.attachments??{}))await verifyAttachment(id,data);
+ const raw=enc.encode(JSON.stringify(clean));
  if(raw.length>LIMIT)throw new Error('حجم پشتیبان بیش از حد مجاز است.');
  const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
  const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:enc.encode(label)},await key(password,salt),raw);
@@ -35,6 +40,6 @@ export async function decryptBackup(text:string,password:string):Promise<BackupS
   const salt=unb64(v.salt),iv=unb64(v.iv),cipher=unb64(v.ciphertext);
   if(salt.length!==16||iv.length!==12||cipher.length>LIMIT+16)throw Error();
   const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv,additionalData:enc.encode(label)},await key(password,salt),cipher);
-  return cleanBackup(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(plain)));
+  const clean=cleanBackup(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(plain)));for(const [id,data] of Object.entries(clean.attachments??{}))await verifyAttachment(id,data);return clean;
  }catch{throw new Error('گذرواژه اشتباه است یا فایل پشتیبان نامعتبر یا آسیب‌دیده است. داده‌های فعلی تغییر نکردند.');}
 }

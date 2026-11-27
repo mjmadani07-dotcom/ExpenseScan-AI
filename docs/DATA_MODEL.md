@@ -28,3 +28,5 @@ Use foreign keys, unique constraints and indexes on ledger/date/category/payment
 
 ## Phase 2 implementation note
 Schema v1 is a transitional transactional snapshot (`ledger_state`, revision and payload). This keeps existing financial fields intact and prevents partial approval writes. Normalized indexed tables, separate attachment storage, encrypted backups, and migration from v1 remain release gates. The Node test driver is not shipped in Android; the native driver must implement the same SQL transaction and change-count contract.
+
+Attachment references: optional attachmentId (SHA-256 lowercase hex) and attachmentMime on expense/draft; original immutable bytes reside outside the snapshot. Portable backup includes a map keyed by digest. Native original file limit 12 MiB; backup aggregate remains bounded. Normalization of ledger data and streaming archives remain pending.

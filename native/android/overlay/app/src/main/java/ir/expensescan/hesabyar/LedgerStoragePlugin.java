@@ -12,6 +12,12 @@ import android.util.Base64;
 import androidx.activity.result.ActivityResult;
 import com.getcapacitor.annotation.ActivityCallback;
 import java.io.OutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileInputStream;
+import java.io.ByteArrayOutputStream;
+import java.security.MessageDigest;
+import android.util.AtomicFile;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import javax.crypto.Cipher;
@@ -33,6 +39,8 @@ public class LedgerStoragePlugin extends Plugin {
     private static final int SCHEMA = 2;
     private static final String LEDGER_KEY = "expensescan.ledger.aes.v1";
     private static final String VAULT_KEY = "expensescan.vault.aes.v1";
+    private static final String ATTACHMENT_KEY = "expensescan.attachment.aes.v1";
+    private static final int MAX_ATTACHMENT = 12*1024*1024;
     private static final String PREFIX = "gcm1:";
     private static final int MAX_PAYLOAD = 32 * 1024 * 1024;
 
@@ -213,12 +221,51 @@ public class LedgerStoragePlugin extends Plugin {
         }catch(Exception ex){call.reject("Secure key write failed; no success was reported.");}
     }
 
+    private AtomicFile attachmentFile(String id) throws Exception {
+        if(id==null||!id.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("Invalid attachment ID");
+        File dir=new File(getContext().getFilesDir(),"attachments");
+        if(!dir.isDirectory()&&!dir.mkdirs())throw new IllegalStateException("Attachment directory unavailable");
+        return new AtomicFile(new File(dir,id+".enc"));
+    }
+    private void verifyAttachment(String id,String data)throws Exception{
+        if(data==null||data.length()>((MAX_ATTACHMENT+2)/3)*4)throw new IllegalArgumentException("Invalid attachment length");
+        byte[] bytes=Base64.decode(data,Base64.NO_WRAP);
+        if(bytes.length==0||bytes.length>MAX_ATTACHMENT)throw new IllegalArgumentException("Invalid attachment length");
+        byte[] hash=MessageDigest.getInstance("SHA-256").digest(bytes);
+        StringBuilder hex=new StringBuilder();
+        for(byte b:hash)hex.append(String.format(java.util.Locale.ROOT,"%02x",b&0xff));
+        if(!id.equals(hex.toString()))throw new IllegalStateException("Attachment digest mismatch");
+    }
+    private String readAttachmentData(AtomicFile file,String id)throws Exception{
+        if(file.getBaseFile().length()>24L*1024*1024)throw new IllegalStateException("Attachment too large");
+        String data=decrypt(ATTACHMENT_KEY,new String(file.readFully(),StandardCharsets.UTF_8));
+        verifyAttachment(id,data);return data;
+    }
+    @PluginMethod public synchronized void putAttachment(PluginCall call){
+        if(!requireSession(call))return;
+        try{
+            String id=call.getString("id"),data=call.getString("data");
+            AtomicFile file=attachmentFile(id);verifyAttachment(id,data);
+            if(file.exists()){readAttachmentData(file,id);call.resolve();return;}
+            byte[] cipher=encrypt(ATTACHMENT_KEY,data,true).getBytes(StandardCharsets.UTF_8);
+            FileOutputStream out=null;
+            try{out=file.startWrite();out.write(cipher);file.finishWrite(out);}
+            catch(Exception ex){if(out!=null)file.failWrite(out);throw ex;}
+            call.resolve();
+        }catch(Exception ex){call.reject("Attachment storage failed; existing documents were not overwritten.");}
+    }
+    @PluginMethod public synchronized void readAttachment(PluginCall call){
+        if(!requireSession(call))return;
+        try{String id=call.getString("id");JSObject result=new JSObject();result.put("data",readAttachmentData(attachmentFile(id),id));call.resolve(result);}
+        catch(Exception ex){call.reject("Attachment unavailable or damaged.");}
+    }
+
     @PluginMethod public void saveBackupFile(PluginCall call) {saveExport(call,true);}
     @PluginMethod public void saveExportFile(PluginCall call) {saveExport(call,false);}
     private void saveExport(PluginCall call,boolean backup) {
         if(!requireSession(call))return;
         String data=call.getString("data"), name=call.getString("name"), mime=backup?"application/octet-stream":call.getString("mime");
-        if(data==null||data.length()>64*1024*1024||name==null||!name.matches("[A-Za-z0-9._-]{1,100}")||mime==null||(!backup&&!mime.equals("application/json")&&!mime.equals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))){call.reject("Invalid export file");return;}
+        if(data==null||data.length()>64*1024*1024||name==null||!name.matches("[A-Za-z0-9._-]{1,100}")||mime==null||(!backup&&!mime.equals("application/json")&&!mime.equals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")&&!mime.matches("application/pdf|image/(jpeg|png|webp|gif)|text/(plain|csv)"))){call.reject("Invalid export file");return;}
         if(backup&&!name.endsWith(".esbackup")){call.reject("Invalid backup extension");return;}
         Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);

@@ -7,7 +7,7 @@ export class ExpenseValidationError extends Error {
 }
 const fail = (field: string): never => { throw new ExpenseValidationError(`مقدار نامعتبر: ${field}`); };
 const required = ['title','vendor','documentType','category','costCenter','amount','currency','taxAmount','discountAmount','date','paymentMethod','paymentStatus','lineItems','sourceType'];
-const optional = ['vendorTaxId','exchangeRateToToman','invoiceNumber','trackingCode','paymentTranches','dueDate','purchaser','projectTag','notes','extractionNotes','sourceFileName','sourcePreviewUrl','pageCount'];
+const optional = ['vendorTaxId','exchangeRateToToman','invoiceNumber','trackingCode','paymentTranches','dueDate','purchaser','projectTag','notes','extractionNotes','sourceFileName','sourcePreviewUrl','pageCount','attachmentId','attachmentMime'];
 const keys = new Set([...required,...optional]);
 const methods = ['corporate_card','personal_card','bank_transfer','petty_cash','online_gateway','cash','check'];
 function obj(value: unknown, field: string): Record<string, unknown> {
@@ -57,6 +57,8 @@ export function validateExpenseFields(raw: unknown, categories: CategoryDefiniti
   for (const k of optional.filter(k=>!['exchangeRateToToman','paymentTranches','dueDate','pageCount'].includes(k))) {
     if (v[k] !== undefined && typeof v[k] !== 'string') fail(k);
   }
+  if ((v.attachmentId===undefined)!==(v.attachmentMime===undefined)) fail('پیوست');
+  if(v.attachmentId!==undefined && (!/^[a-f0-9]{64}$/.test(String(v.attachmentId)) || !['image/jpeg','image/png','image/webp','image/gif','application/pdf','text/plain','text/csv'].includes(String(v.attachmentMime)))) fail('پیوست');
   if (v.pageCount !== undefined && (!Number.isSafeInteger(v.pageCount) || Number(v.pageCount) < 1)) fail('pageCount');
   if (v.sourcePreviewUrl !== undefined && !/^data:image\/(png|jpeg|webp|gif);base64,/i.test(String(v.sourcePreviewUrl))) fail('sourcePreviewUrl');
   if (!Array.isArray(v.lineItems)) return fail('اقلام');

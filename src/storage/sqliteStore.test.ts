@@ -161,3 +161,23 @@ test('native export normalizes Persian filename digits and preserves binary data
  assert.deepEqual(Array.from(Uint8Array.from(atob(received.data),c=>c.charCodeAt(0))),[0,255,128,65]);
  }finally{if(previous===undefined)delete g.Capacitor;else g.Capacitor=previous;}
 });
+
+test('separate attachment store preserves originals and full encrypted backup roundtrip',async()=>{
+ const {encodeBytes,digestBytes}=await import('./attachments');const {encryptBackup,decryptBackup}=await import('./portableBackup');
+ const bytes=new Uint8Array([37,80,68,70,45,0,255]);const id=await digestBytes(bytes),data=encodeBytes(bytes);
+ const makeStore=()=>{const map=new Map<string,string>();return {map,async put(id:string,data:string){map.set(id,data);},async get(id:string){const d=map.get(id);if(!d)throw new Error('missing attachment');return d;}};};
+ const db1=new DatabaseSync(':memory:'),db2=new DatabaseSync(':memory:');try{
+ const files=makeStore(),otherFiles=makeStore();await files.put(id,data);
+ const repo=new LocalLedgerRepository(new SqliteSnapshotStore(driver(db1)),files);await repo.initialize();
+ const record=(await repo.add([{...expense,sourceType:'pdf',sourceFileName:'invoice.pdf',attachmentId:id,attachmentMime:'application/pdf'}]))[0];
+ const persisted=(await repo.load()).expenses[0];assert.equal(persisted.attachmentId,id);assert.equal(JSON.stringify(await repo.load()).includes(data),false);
+ const backup=await repo.exportBackup();assert.equal(backup.attachments?.[id],data);
+ const enc=await encryptBackup(backup,'test strong password 123');
+ const decoded=await decryptBackup(enc,'test strong password 123');
+ const second=new LocalLedgerRepository(new SqliteSnapshotStore(driver(db2)),otherFiles);await second.initialize();await second.restoreBackup(decoded);
+ assert.equal(otherFiles.map.get(id),data);assert.equal((await second.load()).expenses[0].id,record.id);
+ await assert.rejects(()=>second.restoreBackup({...decoded,attachments:{[id]:encodeBytes(new Uint8Array([99]))}}),/یکپارچگی/);
+ assert.equal((await second.load()).expenses.length,1);
+ await assert.rejects(()=>repo.add([{...expense,attachmentId:'a'.repeat(64),attachmentMime:'application/pdf'}]));
+ }finally{db1.close();db2.close();}
+});

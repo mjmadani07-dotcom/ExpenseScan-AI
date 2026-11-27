@@ -51,7 +51,7 @@ export const JsonSyncPanel: React.FC<JsonSyncPanelProps> = ({
   const handleExportJson = async () => {
     setIsExporting(true);setErrorMsg(null);try {
     const payload = JSON.stringify(
-      { expenses, ...(categories ? { categories } : {}), budgets, rates },
+      { expenses:expenses.map(({attachmentId:_id,attachmentMime:_mime,...rest})=>rest), ...(categories ? { categories } : {}), budgets, rates },
       null,
       2
     );
@@ -123,7 +123,7 @@ export const JsonSyncPanel: React.FC<JsonSyncPanelProps> = ({
             خروجی و ورود فایل JSON (همگام‌سازی بین دستگاه‌ها)
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            اسناد ثبت‌شده در دستگاه‌های دیگر را با حالت ادغام هوشمند یا جایگزینی کامل وارد کنید.
+            اسناد مالی را ادغام یا جایگزین کنید. JSON فایل اصلی پیوست‌ها را ندارد؛ برای انتقال کامل از پشتیبان رمزگذاری‌شده استفاده کنید.
           </p>
         </div>
 

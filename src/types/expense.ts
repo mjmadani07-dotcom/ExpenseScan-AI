@@ -99,6 +99,8 @@ export interface ExpenseFields {
   extractionNotes?: string;
   sourceType: SourceType;
   sourceFileName?: string;
+  attachmentId?: string; // SHA-256 content reference, bytes stored separately
+  attachmentMime?: string;
   sourcePreviewUrl?: string;
   pageCount?: number;
 }

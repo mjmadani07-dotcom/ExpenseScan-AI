@@ -1,3 +1,4 @@
+import { type AttachmentStore,attachFile,decodeBytes,verifyAttachment } from './attachments';
 import { toEnglishDigits } from '../utils/jalali';
 import { emptyLedger } from './ledgerDomain';
 import { decodeStoredState, type SnapshotStore, type StoredState } from './sqliteStore';
@@ -12,6 +13,8 @@ interface NativeLedgerBridge {
   lockApp():Promise<void>;
   noteActivity():Promise<void>;
   saveExportFile(options:{name:string;data:string;mime:string}):Promise<void>;
+  putAttachment(options:{id:string;data:string}):Promise<void>;
+  readAttachment(options:{id:string}):Promise<{data:string}>;
   loadKeys():Promise<{keys:string}>;
   saveKey(options:{provider:string;value:string}):Promise<{keys:string}>;
   saveBackupFile(options:{name:string;data:string}):Promise<void>;
@@ -55,3 +58,10 @@ export async function nativeExportFile(name:string,data:Uint8Array,mime:string){
  let raw='';for(let i=0;i<data.length;i+=16384)raw+=String.fromCharCode(...data.subarray(i,i+16384));
  await bridge().saveExportFile({name:toEnglishDigits(name),data:btoa(raw),mime});
 }
+
+export const androidAttachments:AttachmentStore={
+ async put(id,data){await verifyAttachment(id,data);await bridge().putAttachment({id,data});},
+ async get(id){const result=await bridge().readAttachment({id});await verifyAttachment(id,result.data);return result.data;}
+};
+export const nativeAttachFile=(file:File,kind:'image'|'pdf'|'text_file')=>attachFile(androidAttachments,file,kind);
+export async function nativeExportAttachment(id:string,mime:string){const data=decodeBytes(await androidAttachments.get(id));const ext:Record<string,string>={'application/pdf':'pdf','image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/gif':'gif','text/plain':'txt','text/csv':'csv'};if(!ext[mime])throw new Error('نوع پیوست نامعتبر است.');await nativeExportFile('attachment-'+id.slice(0,12)+'.'+ext[mime],data,mime);}

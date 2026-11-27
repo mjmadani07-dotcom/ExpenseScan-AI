@@ -1,3 +1,4 @@
+import { nativeAttachFile } from '../storage/androidSnapshotStore';
 import { businessDateIso } from '../utils/jalali';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -61,6 +62,7 @@ interface StagedMediaFile {
   kind: 'image' | 'pdf';
   fileName: string;
   fileSizeBytes: number;
+  original: File;
   pages: RenderedPage[];
   totalPages: number;
 }
@@ -100,6 +102,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   const activeCategories = resolveCategories(categories);
   const [mode, setMode] = useState<InputMode>('file_photo');
   const [rawText, setRawText] = useState('');
+  const originalText=useRef<File|null>(null);
   const [textFileName, setTextFileName] = useState<string | undefined>(undefined);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -147,6 +150,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   const handleRemoveTextFile = () => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
+    originalText.current=null;
     setTextFileName(undefined);
     setRawText('');
     setErrorMessage(null);
@@ -161,6 +165,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
     sType: SourceType;
     fileName?: string;
     totalPages?: number;
+    original?: File;
   }) => {
     setErrorMessage(null);
     setIsProcessing(true);
@@ -213,6 +218,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
             })),
             text: params.text,
             sourceType: params.sType,
+            ...attachment,
             fileName: params.fileName,
             provider: selectedAi.provider,
             model: selectedAi.model,
@@ -228,6 +234,8 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
         extractedList = data.expenses ?? [];
       }
 
+      if(controller.signal.aborted)return;
+      const attachment=localMode&&params.original&&params.sType!=='text'?await nativeAttachFile(params.original,params.sType):{};
       const previewThumb = params.pages?.[0]
         ? await createThumbnailDataUrl(params.pages[0].dataUrl)
         : undefined;
@@ -260,7 +268,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
 
       onDraftsReady(
         drafts,
-        params.pages?.map((p) => p.dataUrl) ?? []
+        localMode ? (previewThumb?[previewThumb]:[]) : (params.pages?.map((p) => p.dataUrl) ?? [])
       );
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
@@ -287,6 +295,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
         kind: 'image',
         fileName: file.name,
         fileSizeBytes: file.size,
+        original:file,
         pages: [compressed],
         totalPages: 1,
       });
@@ -318,6 +327,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
         kind: 'pdf',
         fileName: file.name,
         fileSizeBytes: file.size,
+        original:file,
         pages,
         totalPages,
       });
@@ -341,13 +351,20 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
       }
       setMode('text');
       setRawText(text);
+      originalText.current=file;
       setTextFileName(file.name);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'خطا در خواندن فایل متنی');
     }
   };
 
-  const handleCreateManualDraft = () => {
+  const handleCreateManualDraft = async () => {
+    if(isProcessing)return;
+    setIsProcessing(true);setErrorMessage(null);
+    try {
+    const source=mode==='file_photo'?stagedFile?.original:originalText.current??undefined;
+    const kind=mode==='file_photo'?stagedFile?.kind:source?'text_file':undefined;
+    const attachment=localMode&&source&&kind?await nativeAttachFile(source,kind):{};
     const today = businessDateIso();
     const defaultCategory = activeCategories.some((c) => c.id === 'operations')
       ? 'operations'
@@ -370,11 +387,14 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           paymentMethod: 'corporate_card',
           paymentStatus: 'paid',
           lineItems: [],
-          sourceType: 'text',
+          sourceType: kind??'text',
+          sourceFileName:source?.name,
+          ...attachment,
         },
       ],
       []
     );
+    }catch(err){setErrorMessage(err instanceof Error?err.message:'خطا در ذخیره فایل اصلی');}finally{setIsProcessing(false);}
   };
 
   return (
@@ -391,6 +411,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
 
         <button
           type="button"
+          disabled={isProcessing}
           onClick={handleCreateManualDraft}
           className="inline-flex items-center justify-center gap-2 min-h-[42px] px-4 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
         >
@@ -766,6 +787,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
                   sType: stagedFile.kind,
                   fileName: stagedFile.fileName,
                   totalPages: stagedFile.totalPages,
+                  original:stagedFile.original,
                 })
               }
               className="inline-flex items-center gap-2 min-h-[44px] px-5 py-2.5 rounded-xl bg-teal-700 text-white text-sm font-semibold hover:bg-teal-800 transition-colors cursor-pointer"
@@ -987,6 +1009,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
                   text: rawText,
                   sType: textFileName ? 'text_file' : 'text',
                   fileName: textFileName,
+                  original:originalText.current??undefined,
                 })
               }
               className="min-h-[44px] px-6 py-2.5 rounded-xl bg-teal-700 text-white text-sm font-semibold hover:bg-teal-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"

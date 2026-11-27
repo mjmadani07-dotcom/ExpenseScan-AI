@@ -1,3 +1,4 @@
+import { isAndroidRuntime,nativeExportAttachment } from '../storage/androidSnapshotStore';
 import { businessDateIso } from '../utils/jalali';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -1270,6 +1271,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                   )}
                 </div>
 
+                {selectedExpense.attachmentId && <div className="rounded-xl border p-3 space-y-2 text-xs"><p className="font-semibold">فایل اصلی رمزگذاری‌شده</p><p className="break-all">{selectedExpense.sourceFileName??'پیوست سند'}</p>{isAndroidRuntime()&&<button type="button" disabled={isMutating} className="border rounded-lg p-2" onClick={()=>{if(window.confirm('فایل اصلی بدون رمزگذاری در مسیر انتخابی ذخیره شود؟'))void runMutation(()=>nativeExportAttachment(selectedExpense.attachmentId!,selectedExpense.attachmentMime!));}}>ذخیره و مشاهده فایل اصلی</button>}<button type="button" disabled={isMutating} className="text-red-700 border rounded-lg p-2 mr-2" onClick={()=>{if(window.confirm('اتصال فایل اصلی به این سند حذف شود؟ نسخه‌های بازیابی ممکن است همچنان آن را داشته باشند.'))void runMutation(()=>onUpdateExpense(selectedExpense.id,{attachmentId:undefined,attachmentMime:undefined}));}}>قطع اتصال پیوست</button></div>}
                 {selectedExpense.sourcePreviewUrl && (
                   <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-100 relative">
                     <img

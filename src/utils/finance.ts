@@ -1112,7 +1112,8 @@ export function mergeLedgerData(
     } else {
       added += 1;
     }
-    map.set(inc.id, inc);
+    const existing=map.get(inc.id);
+    map.set(inc.id, !inc.attachmentId && existing?.attachmentId ? {...inc,attachmentId:existing.attachmentId,attachmentMime:existing.attachmentMime} : inc);
   }
 
   const mergedExpenses = Array.from(map.values()).sort(

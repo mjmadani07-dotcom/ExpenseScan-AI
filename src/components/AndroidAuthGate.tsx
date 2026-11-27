@@ -1,6 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react';
 import App from '../App';
-import { AndroidSnapshotStore,nativeActivity,nativeLock,nativeSessionStatus,nativeUnlock } from '../storage/androidSnapshotStore';
+import { AndroidSnapshotStore,androidAttachments,nativeActivity,nativeLock,nativeSessionStatus,nativeUnlock } from '../storage/androidSnapshotStore';
 import { LocalLedgerRepository } from '../storage/localLedgerRepository';
 
 export function AndroidAuthGate(){
@@ -18,7 +18,7 @@ export function AndroidAuthGate(){
    return ()=>{disposed=true;window.clearInterval(interval);window.removeEventListener('pointerdown',touch,true);window.removeEventListener('keydown',touch,true);document.removeEventListener('visibilitychange',visibility);};
  },[]);
  const unlock=async()=>{if(attempt.current)return;attempt.current=true;setBusy(true);setError('');
-   try{await nativeUnlock();const next=new LocalLedgerRepository(new AndroidSnapshotStore());await next.initialize();current.current=next;setRepo(next);}
+   try{await nativeUnlock();const next=new LocalLedgerRepository(new AndroidSnapshotStore(),androidAttachments);await next.initialize();current.current=next;setRepo(next);}
    catch(e){drop();setError(e instanceof Error?e.message:'ورود ناموفق بود.');}
    finally{attempt.current=false;setBusy(false);}
  };
