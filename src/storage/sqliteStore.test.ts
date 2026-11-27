@@ -242,3 +242,12 @@ test('Android authentication bridge selects explicit biometric or system credent
  assert.equal((await nativeSessionStatus()).biometricAvailable,true);await nativeUnlock(true);await nativeUnlock();assert.deepEqual(calls,['biometric','credential']);
  }finally{if(previous===undefined)delete g.Capacitor;else g.Capacitor=previous;}
 });
+
+test('cleanup bridge passes only exact committed revision, not a client orphan list',async()=>{
+ const {androidAttachments}=await import('./androidSnapshotStore');
+ const g=globalThis as any,previous=g.Capacitor;let call:unknown;
+ try{g.Capacitor={getPlatform:()=> 'android',Plugins:{LedgerStorage:{async cleanupAttachments(v:unknown){call=v;return {removed:1,releasedBytes:100,failed:0,skipped:2};}}}};
+ const result=await androidAttachments.cleanup!(17);assert.deepEqual(call,{revision:'17'});assert.equal(result.removed,1);
+ await assert.rejects(()=>androidAttachments.cleanup!(-1),/نامعتبر/);
+ }finally{if(previous===undefined)delete g.Capacitor;else g.Capacitor=previous;}
+});

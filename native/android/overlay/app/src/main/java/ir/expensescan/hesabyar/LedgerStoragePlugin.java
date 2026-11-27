@@ -45,6 +45,7 @@ public class LedgerStoragePlugin extends Plugin {
     private static final String VAULT_KEY = "expensescan.vault.aes.v1";
     private static final String ATTACHMENT_KEY = "expensescan.attachment.aes.v1";
     private static final int MAX_ATTACHMENT = 12*1024*1024;
+    private static final long ORPHAN_GRACE_MS=24L*60*60*1000;
     private static final String PREFIX = "gcm1:";
     private static final int MAX_PAYLOAD = 32 * 1024 * 1024;
 
@@ -244,6 +245,8 @@ public class LedgerStoragePlugin extends Plugin {
                             if(deletes.length()!=0)throw new IllegalArgumentException("Invalid migration");
                             LedgerTables.create(db,revision);
                         }
+                        // Prevent dangling references even if a cleanup happened after JS checked a file.
+                        if(!migration)for(String id:AttachmentReferences.fromRows(upserts))if(!attachmentExists(id))throw new IllegalStateException("Referenced attachment missing");
                         LedgerTables.apply(db,deletes,upserts,rowCodec());
                         ContentValues v=new ContentValues();v.put("revision",revision+1);
                         if(db.update("ledger_revision",v,"id=1 AND revision=?",new String[]{revisionText})!=1)throw new IllegalStateException("Revision changed");
@@ -299,6 +302,10 @@ public class LedgerStoragePlugin extends Plugin {
         for(byte b:hash)hex.append(String.format(java.util.Locale.ROOT,"%02x",b&0xff));
         if(!id.equals(hex.toString()))throw new IllegalStateException("Attachment digest mismatch");
     }
+    private boolean attachmentExists(String id)throws Exception{
+        File file=attachmentFile(id).getBaseFile();
+        return file.isFile()||new File(file.getPath()+".bak").isFile();
+    }
     private String readAttachmentData(AtomicFile file,String id)throws Exception{
         if(file.getBaseFile().length()>24L*1024*1024)throw new IllegalStateException("Attachment too large");
         String data=decrypt(ATTACHMENT_KEY,new String(file.readFully(),StandardCharsets.UTF_8));
@@ -309,13 +316,49 @@ public class LedgerStoragePlugin extends Plugin {
         try{
             String id=call.getString("id"),data=call.getString("data");
             AtomicFile file=attachmentFile(id);verifyAttachment(id,data);
-            if(file.getBaseFile().exists() || new File(file.getBaseFile().getPath()+".bak").exists()){readAttachmentData(file,id);call.resolve();return;}
+            if(attachmentExists(id)){readAttachmentData(file,id);if(!file.getBaseFile().setLastModified(System.currentTimeMillis()))throw new IllegalStateException("Cannot renew attachment lease");call.resolve();return;}
             byte[] cipher=encrypt(ATTACHMENT_KEY,data,true).getBytes(StandardCharsets.UTF_8);
             FileOutputStream out=null;
             try{out=file.startWrite();out.write(cipher);file.finishWrite(out);}
             catch(Exception ex){if(out!=null)file.failWrite(out);throw ex;}
             call.resolve();
         }catch(Exception ex){call.reject("Attachment storage failed; existing documents were not overwritten.");}
+    }
+    @PluginMethod public synchronized void cleanupAttachments(PluginCall call){
+        if(!requireSession(call))return;
+        try{
+            String expected=call.getString("revision");
+            if(expected==null||!expected.matches("[0-9]{1,16}"))throw new IllegalArgumentException("Invalid revision");
+            int removed=0,failed=0,skipped=0;long released=0;
+            // All native file mutations and row commits use the same synchronized plugin instance.
+            // Recompute references inside a DB transaction; never trust a JS-supplied orphan list.
+            try(SQLiteDatabase db=open()){
+                db.beginTransaction();
+                try{
+                    if(db.getVersion()!=LedgerTables.VERSION||LedgerTables.revision(db,"ledger_revision")!=Long.parseLong(expected))throw new IllegalStateException("Ledger changed");
+                    java.util.Set<String> protectedIds=AttachmentReferences.fromRows(LedgerTables.read(db,rowCodec()));
+                    for(String id:protectedIds)if(!attachmentExists(id))throw new IllegalStateException("A referenced file is missing; cleanup refused");
+                    File dir=new File(getContext().getFilesDir(),"attachments");
+                    if(dir.exists()){
+                        File[] files=dir.listFiles();if(files==null)throw new IllegalStateException("Cannot list attachments");
+                        long now=System.currentTimeMillis();
+                        for(File file:files){
+                            String n=file.getName();
+                            if(!file.isFile()||!n.matches("[a-f0-9]{64}\\.enc"))continue;
+                            String id=n.substring(0,64);
+                            if(protectedIds.contains(id))continue;
+                            long touched=file.lastModified();
+                            // Leave recent captures and all incomplete/recovery sidecars alone.
+                            if(touched<=0||touched>now-ORPHAN_GRACE_MS||new File(file.getPath()+".bak").exists()||new File(file.getPath()+".new").exists()){skipped++;continue;}
+                            long bytes=file.length();
+                            if(file.delete()){removed++;released+=bytes;}else failed++;
+                        }
+                    }
+                    db.setTransactionSuccessful();
+                }finally{db.endTransaction();}
+            }
+            JSObject result=new JSObject();result.put("removed",removed);result.put("releasedBytes",released);result.put("failed",failed);result.put("skipped",skipped);call.resolve(result);
+        }catch(Exception ex){call.reject("Attachment cleanup stopped; check storage again before retrying.");}
     }
     @PluginMethod public synchronized void attachmentInventory(PluginCall call){
         if(!requireSession(call))return;

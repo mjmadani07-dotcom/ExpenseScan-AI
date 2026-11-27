@@ -1,5 +1,5 @@
 import { assembleLedger,canonicalJson,diffLedgerRows,partitionLedger,type LedgerRow } from './ledgerRows';
-import { type AttachmentStore,attachFile,decodeBytes,verifyAttachment } from './attachments';
+import { type AttachmentStore,type AttachmentCleanupResult,attachFile,decodeBytes,verifyAttachment } from './attachments';
 import { toEnglishDigits } from '../utils/jalali';
 import { emptyLedger } from './ledgerDomain';
 import { decodeStoredState, type SnapshotStore, type StoredState } from './sqliteStore';
@@ -18,6 +18,7 @@ interface NativeLedgerBridge {
   putAttachment(options:{id:string;data:string}):Promise<void>;
   readAttachment(options:{id:string}):Promise<{data:string}>;
   attachmentInventory():Promise<{items:string}>;
+  cleanupAttachments(options:{revision:string}):Promise<AttachmentCleanupResult>;
   loadKeys():Promise<{keys:string}>;
   saveKey(options:{provider:string;value:string}):Promise<{keys:string}>;
   saveBackupFile(options:{name:string;data:string}):Promise<void>;
@@ -81,6 +82,7 @@ export async function nativeExportFile(name:string,data:Uint8Array,mime:string){
 }
 
 export const androidAttachments:AttachmentStore={
+ async cleanup(revision){if(!Number.isSafeInteger(revision)||revision<0)throw new Error('نسخه دفتر نامعتبر است.');return bridge().cleanupAttachments({revision:String(revision)});},
  async inventory(){return JSON.parse((await bridge().attachmentInventory()).items);},
  async put(id,data){await verifyAttachment(id,data);await bridge().putAttachment({id,data});},
  async get(id){const result=await bridge().readAttachment({id});await verifyAttachment(id,result.data);return result.data;}

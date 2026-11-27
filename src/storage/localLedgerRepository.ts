@@ -52,6 +52,12 @@ export class LocalLedgerRepository implements LedgerRepository {
     delete s.recovery;
   }
   async exportBackup(){await this.queue.catch(()=>{});const s=(await this.store.read()).state;const ids=snapshotAttachmentIds(s.ledger,s.draft);const attachments:Record<string,string>={};let total=0;if(ids.length&&!this.attachments)throw new Error('محل نگهداری پیوست در دسترس نیست.');for(const id of ids){const data=await this.attachments!.get(id);await verifyAttachment(id,data);total+=data.length;if(total>28*1024*1024)throw new Error('مجموع پیوست‌ها از ظرفیت فعلی فایل پشتیبان بیشتر است؛ هیچ فایل ناقصی ایجاد نشد.');attachments[id]=data;}return cleanBackup({ledger:s.ledger,draft:s.draft,attachments});}
+  cleanupAttachments(){
+    const task=this.queue.catch(()=>{}).then(async()=>{
+      if(!this.attachments?.cleanup)throw new Error('پاک‌سازی در این دستگاه در دسترس نیست.');
+      const {revision}=await this.store.read();return this.attachments.cleanup(revision);
+    });this.queue=task;return task;
+  }
   async attachmentAudit(){await this.queue.catch(()=>{});if(!this.attachments?.inventory)throw new Error('فهرست فایل‌های اصلی در دسترس نیست.');const s=(await this.store.read()).state;return auditAttachmentInventory(await this.attachments.inventory(),s);}
   async recoveryList(){await this.queue.catch(()=>{});return ((await this.store.read()).state.recoveries??[]).map(r=>({id:r.id,createdAt:r.createdAt,count:r.ledger.expenses.length}));}
   async recoveryInfo(){return (await this.recoveryList())[0]??null;}
