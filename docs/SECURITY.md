@@ -25,3 +25,5 @@ Android native payload and API key map have distinct AES-GCM Keystore aliases; n
 Release signing is owner-controlled through a dedicated protected environment and verified certificate fingerprint. See ANDROID_SIGNING.md. Do not treat GitHub debug signatures as a stable update identity.
 
 Device credential gate is implemented in Java via Android KeyguardManager, not a JS-only overlay. Session timeout uses monotonic elapsed time, sensitive bridge methods check session, and UI unmounts on lock. FLAG_SECURE prevents ordinary screenshot/task preview capture. This is an app access gate, not a claim that the Keystore keys require per-use device authentication or that a compromised process is protected. No custom PIN/biometric prompt yet; device testing required. JSON/XLSX exports are not encrypted.
+
+Internal recovery archive: three rotating checkpoints, each stored inside the encrypted ledger payload, manual creation and selective restore/delete. Logical deletion does not guarantee physical erasure. Capacity limit is shared with the ledger; exceeding it fails closed. No scheduled external backup or off-device synchronization is implemented.

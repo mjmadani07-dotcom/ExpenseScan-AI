@@ -122,3 +122,31 @@ test('encrypted portable backup rejects wrong passwords and tampering; excludes 
  await repo.clear('all');await repo.restoreBackup(restored);assert.equal((await repo.load()).expenses.length,1);
  }finally{db.close();}
 });
+
+test('recovery archive keeps three versions, restores by ID and deletes only selected checkpoint',async()=>{
+ const db=new DatabaseSync(':memory:');try{
+ const repo=new LocalLedgerRepository(new SqliteSnapshotStore(driver(db)));await repo.initialize();
+ await repo.createRecovery();
+ const empty=(await repo.recoveryList())[0];
+ await repo.add([expense]);await repo.createRecovery();
+ const one=(await repo.recoveryList())[0];
+ await repo.add([{...expense,title:'second'}]);await repo.createRecovery();
+ await repo.add([{...expense,title:'third'}]);await repo.createRecovery();
+ const archive=await repo.recoveryList();assert.equal(archive.length,3);assert.equal(archive.some(x=>x.id===empty.id),false);
+ await repo.deleteRecovery(archive[1].id);assert.equal((await repo.recoveryList()).length,2);
+ assert.equal((await repo.load()).expenses.length,3);
+ await repo.restoreRecovery(one.id);assert.equal((await repo.load()).expenses.length,1);
+ assert.equal((await repo.recoveryList())[0].count,3);
+ await assert.rejects(()=>repo.deleteRecovery('missing'),/یافت نشد/);
+ }finally{db.close();}
+});
+test('legacy single recovery is preserved in multi-version archive',async()=>{
+ const db=new DatabaseSync(':memory:');try{
+ const store=new SqliteSnapshotStore(driver(db));await store.initialize();
+ const row=await store.read();const legacy={...row.state,recoveries:undefined,recovery:{createdAt:'2026-11-27T00:00:00Z',ledger:row.state.ledger,draft:null}};
+ db.prepare('UPDATE ledger_state SET payload=? WHERE id=1').run(JSON.stringify(legacy));
+ const repo=new LocalLedgerRepository(store);
+ assert.equal((await repo.recoveryList()).length,1);
+ await repo.createRecovery();assert.equal((await repo.recoveryList()).length,2);
+ }finally{db.close();}
+});

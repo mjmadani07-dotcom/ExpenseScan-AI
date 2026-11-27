@@ -20,7 +20,10 @@ export interface LedgerRepository {
   exportBackup?():Promise<import('./portableBackup').BackupSnapshot>;
   restoreBackup?(snapshot:import('./portableBackup').BackupSnapshot):Promise<void>;
   recoveryInfo?():Promise<{createdAt:string;count:number}|null>;
-  restoreRecovery?():Promise<void>;
+  restoreRecovery?(id?:string):Promise<void>;
+  recoveryList?():Promise<{id:string;createdAt:string;count:number}[]>;
+  createRecovery?():Promise<void>;
+  deleteRecovery?(id:string):Promise<void>;
 }
 
 export class WebLedgerRepository implements LedgerRepository {

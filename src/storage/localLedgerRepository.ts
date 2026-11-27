@@ -43,9 +43,16 @@ export class LocalLedgerRepository implements LedgerRepository {
   addCategory(input:Parameters<LedgerDomain['addCategoryOnServer']>[0]){return this.change(d=>d.addCategoryOnServer(input));}
   updateCategory(id:string,patch:Parameters<LedgerDomain['updateCategoryOnServer']>[1]){return this.change(d=>{const result=d.updateCategoryOnServer(id,patch);if(!result)throw new Error('دسته‌بندی یافت نشد.');return result;});}
   deleteCategory(id:string,reassignToId?:string){return this.change((d,s)=>{this.checkpoint(s);return d.deleteCategoryOnServer(id,reassignToId);});}
-  private checkpoint(s:StoredState){s.recovery={createdAt:new Date().toISOString(),ledger:structuredClone(s.ledger),draft:structuredClone(s.draft)};}
+  private checkpoint(s:StoredState){
+    const next={id:globalThis.crypto.randomUUID(),createdAt:new Date().toISOString(),ledger:structuredClone(s.ledger),draft:structuredClone(s.draft)};
+    s.recoveries=[next,...(s.recoveries??[])].slice(0,3);
+    delete s.recovery;
+  }
   async exportBackup(){await this.queue.catch(()=>{});const s=(await this.store.read()).state;return cleanBackup({ledger:s.ledger,draft:s.draft});}
-  async recoveryInfo(){await this.queue.catch(()=>{});const r=(await this.store.read()).state.recovery;return r?{createdAt:r.createdAt,count:r.ledger.expenses.length}:null;}
+  async recoveryList(){await this.queue.catch(()=>{});return ((await this.store.read()).state.recoveries??[]).map(r=>({id:r.id,createdAt:r.createdAt,count:r.ledger.expenses.length}));}
+  async recoveryInfo(){return (await this.recoveryList())[0]??null;}
+  createRecovery(){return this.change((_d,s)=>{this.checkpoint(s);});}
+  deleteRecovery(id:string){return this.change((_d,s)=>{if(!s.recoveries?.some(r=>r.id===id))throw new Error('نسخه بازیابی یافت نشد.');s.recoveries=s.recoveries.filter(r=>r.id!==id);});}
   restoreBackup(snapshot:BackupSnapshot){const clean=cleanBackup(snapshot);return this.change((d,s)=>{this.checkpoint(s);d.ledger={...clean.ledger,aiConfig:d.ledger.aiConfig};s.draft=clean.draft;s.lastApproval=undefined;});}
-  restoreRecovery(){return this.change((d,s)=>{const r=s.recovery;if(!r)throw new Error('نسخه بازیابی موجود نیست.');this.checkpoint(s);d.ledger=r.ledger;s.draft=r.draft;s.lastApproval=undefined;});}
+  restoreRecovery(id?:string){return this.change((d,s)=>{const r=id?s.recoveries?.find(x=>x.id===id):s.recoveries?.[0];if(!r)throw new Error('نسخه بازیابی موجود نیست.');this.checkpoint(s);d.ledger={...r.ledger,aiConfig:d.ledger.aiConfig};s.draft=r.draft;s.lastApproval=undefined;});}
 }
