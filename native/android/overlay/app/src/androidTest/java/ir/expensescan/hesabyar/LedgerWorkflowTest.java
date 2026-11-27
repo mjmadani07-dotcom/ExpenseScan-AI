@@ -12,6 +12,10 @@ import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+import java.util.regex.Pattern;
+import android.util.Log;
+import android.view.KeyEvent;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -62,14 +66,61 @@ public class LedgerWorkflowTest {
         String q=JSONObject.quote(selector);waitFor(app,"document.querySelector("+q+")","Missing file input");
         assertEquals("true",eval(app,"(()=>{const e=document.querySelector("+q+"),d=new DataTransfer();d.items.add(new File([Uint8Array.from(atob("+JSONObject.quote(base64)+"),c=>c.charCodeAt(0))],"+JSONObject.quote(name)+",{type:"+JSONObject.quote(mime)+"}));e.files=d.files;e.dispatchEvent(new Event('change',{bubbles:true}));return true})()"));
     }
+    private String resumed()throws Exception{
+        String state=shell("dumpsys activity activities");
+        for(String line:state.split("\n"))if(line.contains("topResumedActivity=")||line.contains("mResumedActivity:"))return line.trim();
+        return "";
+    }
+    private void diagnostics(String stage){
+        try{
+            ByteArrayOutputStream out=new ByteArrayOutputStream();
+            device.dumpWindowHierarchy(out);
+            String xml=out.toString("UTF-8");
+            Log.e("ExpenseScanE2E",stage+"; foreground="+device.getCurrentPackageName()+"; "+resumed());
+            Log.e("ExpenseScanE2E",xml.substring(0,Math.min(xml.length(),12000)));
+        }catch(Exception ex){Log.e("ExpenseScanE2E","Unable to collect test diagnostics",ex);}
+    }
+    private static boolean credentialActivity(String activity){
+        return (activity.contains("com.android.settings/")||activity.contains("com.google.android.settings/")||activity.contains("com.android.systemui/"))
+            &&(activity.contains("ConfirmLock")||activity.contains("ConfirmDeviceCredential")||activity.contains("Credential")||activity.contains("Biometric"));
+    }
     private void unlock(ActivityScenario<MainActivity> app)throws Exception{
-        text(app,"حساب‌یار قفل است");click(app,"ورود با رمز گوشی");
-        UiObject2 entry=device.wait(Until.findObject(By.clazz("android.widget.EditText")),12000);
-        assertNotNull("Android credential entry missing",entry);entry.click();
-        device.executeShellCommand("input text "+PIN);
-        device.pressEnter();
-        waitFor(app,"document.querySelector('nav[aria-label=\"ناوبری موبایل\"]')","App did not unlock with system credential");
-        waitFor(app,"!document.body.innerText.includes('در حال بارگذاری')","Ledger loading failed");
+        text(app,"حساب‌یار قفل است");
+        JSONObject status=bridge(app,"Capacitor.Plugins.LedgerStorage.sessionStatus()");
+        assertTrue("Emulator must have a secure device credential",status.getBoolean("ok")&&status.getJSONObject("value").getBoolean("deviceSecure"));
+        String b=buttons("ورود با رمز گوشی");waitFor(app,b,"Credential button unavailable");
+        // Return from WebView before system credential UI takes the foreground.
+        eval(app,"(()=>{const b="+b+";setTimeout(()=>b.click(),100);return true})()");
+        boolean shown=false;
+        try{
+            long end=android.os.SystemClock.elapsedRealtime()+25000;
+            do{
+                String activity=resumed();
+                if(credentialActivity(activity)){shown=true;break;}
+                Thread.sleep(300);
+            }while(android.os.SystemClock.elapsedRealtime()<end);
+            if(!shown){diagnostics("Credential activity not displayed");fail("System credential activity not displayed");}
+            UiObject2 entry=device.findObject(By.res(Pattern.compile(".*:id/(password_entry|pinEntry|pin_entry|passwordEntry)")));
+            if(entry==null)entry=device.findObject(By.clazz("android.widget.EditText"));
+            if(entry!=null)entry.click();
+            // Android PIN views can be custom TextViews/keypads rather than EditText.
+            // Dispatch digit keys only after verifying the actual OS credential activity.
+            for(char digit:PIN.toCharArray()){
+                if(!credentialActivity(resumed()))break;
+                UiObject2 key=device.findObject(By.res(Pattern.compile(".*:id/(key"+digit+"|digit_"+digit+")")));
+                if(key!=null)key.click();else device.pressKeyCode(KeyEvent.KEYCODE_0+(digit-'0'));
+                Thread.sleep(150);
+            }
+            if(credentialActivity(resumed())){
+                UiObject2 enter=device.findObject(By.res(Pattern.compile(".*:id/(key_enter|keyEnter|next_button|confirm_button)")));
+                if(enter!=null&&enter.isEnabled())enter.click();else device.pressEnter();
+            }
+            end=android.os.SystemClock.elapsedRealtime()+25000;
+            while(credentialActivity(resumed())&&android.os.SystemClock.elapsedRealtime()<end)Thread.sleep(300);
+            if(credentialActivity(resumed())){diagnostics("Credential verification did not return");fail("System credential did not verify");}
+            waitFor(app,"document.querySelector('nav[aria-label=\"ناوبری موبایل\"]')","App did not unlock with system credential");
+            waitFor(app,"!document.body.innerText.includes('در حال بارگذاری')","Ledger loading failed");
+        }catch(AssertionError|Exception ex){diagnostics("Unlock failed");throw ex;}
     }
     private JSONObject bridge(ActivityScenario<MainActivity> app,String operation)throws Exception{
         // Use the actual production Capacitor bridge, not an alternate database or mocked auth.
@@ -112,6 +163,7 @@ public class LedgerWorkflowTest {
     }
     @Test public void offlineInvoiceLifecycleAndPortableBackup()throws Exception{
         // This runs only on a freshly provisioned disposable emulator.
+        assertTrue("Synthetic workflow must never run on a physical phone","1".equals(shell("getprop ro.kernel.qemu"))||"1".equals(shell("getprop ro.boot.qemu")));
         assertEquals("1",shell("settings get global airplane_mode_on"));
         String id,attachment,encoded;
         try(ActivityScenario<MainActivity> app=ActivityScenario.launch(MainActivity.class)){
@@ -143,7 +195,8 @@ public class LedgerWorkflowTest {
             field(app,passwordSelector,PASSWORD);
             // Each password is in a different label; target the second via the input collection.
             eval(app,"(()=>{const e=document.querySelectorAll("+JSONObject.quote(passwordSelector)+")[1];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,"+JSONObject.quote(PASSWORD)+");e.dispatchEvent(new Event('input',{bubbles:true}));return true})()");
-            click(app,"ذخیره فایل پشتیبان");saveDocument();
+            String save=buttons("ذخیره فایل پشتیبان");waitFor(app,save,"Backup export control unavailable");
+            eval(app,"(()=>{const b="+save+";setTimeout(()=>b.click(),100);return true})()");saveDocument();
             text(app,"فایل پشتیبان رمزگذاری‌شده ذخیره شد.");
             String path=shell("find /sdcard/Download -maxdepth 1 -type f -name 'ExpenseScan-*.esbackup2' | head -n 1");
             assertTrue("SAF backup not found in Downloads",path.startsWith("/sdcard/Download/ExpenseScan-")&&path.endsWith(".esbackup2")&&!path.contains("'"));

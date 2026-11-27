@@ -62,13 +62,22 @@ jobs:
           printf 'no\n' | "$avdmanager_path" create avd --force -n ExpenseScanCI -k "system-images;android-35;google_apis;x86_64" -p "$ANDROID_AVD_HOME/ExpenseScanCI.avd"
           test -f "$ANDROID_AVD_HOME/ExpenseScanCI.ini"
           "$sdk_root/emulator/emulator" -list-avds | grep -Fxq ExpenseScanCI
+      - name: Compile app and instrumentation before offline device test
+        working-directory: .android-build/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          # The host requires Maven access; the device itself will be offline.
+          # Retry the dependency/build stage once, not failed assertions.
+          ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest || ./gradlew --no-daemon --refresh-dependencies :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Boot emulator and run installed-app instrumentation
         working-directory: .android-build/android
         shell: bash
         run: |
           set -euo pipefail
           "$ANDROID_HOME/emulator/emulator" -avd ExpenseScanCI -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -memory 2048 -cores 2 > /tmp/expensescan-emulator.log 2>&1 &
-          trap 'adb emu kill >/dev/null 2>&1 || true; tail -n 40 /tmp/expensescan-emulator.log || true' EXIT
+          trap 'rc=$?; if [ "$rc" -ne 0 ]; then adb logcat -d -s ExpenseScanE2E:E AndroidRuntime:E ActivityTaskManager:I | tail -n 180 || true; fi; adb emu kill >/dev/null 2>&1 || true; tail -n 40 /tmp/expensescan-emulator.log || true' EXIT
           emulator_pid=$!
           adb start-server
           # Fail immediately if emulator exits rather than waiting on an absent device.
@@ -86,6 +95,9 @@ jobs:
           adb shell input keyevent 82
           # Disposable emulator credential only; no production secret or bypass.
           adb shell locksettings set-pin 2468
+          adb shell locksettings verify --old 2468
+          adb shell settings put system screen_off_timeout 1800000
+          adb shell svc power stayon true
           adb shell settings put global airplane_mode_on 1
           adb shell cmd connectivity airplane-mode enable
           adb shell svc wifi disable
