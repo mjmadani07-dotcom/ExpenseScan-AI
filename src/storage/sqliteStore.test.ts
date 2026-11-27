@@ -87,3 +87,22 @@ test('Web transport omits optional undefined fields on create and sends explicit
   assert.equal((sent[1] as any).notes,null);
   assert.equal(Object.hasOwn((sent[1] as any).paymentTranches[0],'date'),false);
 });
+
+test('Android bridge uses exact revision string, validates snapshots and fails closed',async()=>{
+  const {AndroidSnapshotStore}=await import('./androidSnapshotStore');
+  const global=globalThis as any;
+  const previous=global.Capacitor;
+  try {
+    let payload='',rev=0;
+    global.Capacitor={getPlatform:()=> 'android',Plugins:{LedgerStorage:{
+      async initialize(v:any){if(!payload)payload=v.initialPayload;},
+      async read(){return {revision:rev,payload};},
+      async compareAndSwap(v:any){assert.equal(typeof v.revision,'string');if(v.revision!==String(rev))return {committed:false};payload=v.payload;rev++;return {committed:true};}
+    }}};
+    const store=new AndroidSnapshotStore();await store.initialize();
+    const repo=new LocalLedgerRepository(store);
+    await repo.add([expense]);assert.equal((await repo.load()).expenses[0].amount,12345);
+    global.Capacitor={getPlatform:()=> 'android'};
+    await assert.rejects(()=>store.read(),/اندروید/);
+  } finally {if(previous===undefined)delete global.Capacitor;else global.Capacitor=previous;}
+});

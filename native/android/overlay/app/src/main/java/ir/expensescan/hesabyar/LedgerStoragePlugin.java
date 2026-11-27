@@ -75,8 +75,11 @@ public class LedgerStoragePlugin extends Plugin {
 
     @PluginMethod public synchronized void compareAndSwap(PluginCall call) {
         try {
-            Long revision = call.getLong("revision");
-            if (revision == null || revision < 0) throw new IllegalArgumentException("Invalid revision");
+            // Android JSON often decodes small numbers as Integer, not Long.
+            String revisionText = call.getString("revision");
+            if (revisionText == null || !revisionText.matches("[0-9]{1,16}")) throw new IllegalArgumentException("Invalid revision");
+            long revision = Long.parseLong(revisionText);
+            if (revision > 9007199254740990L) throw new IllegalArgumentException("Revision exceeds JS safe range");
             String payload = checkedPayload(call,"payload");
             int changes;
             try (SQLiteDatabase db = open()) {

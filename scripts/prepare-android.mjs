@@ -12,6 +12,8 @@ if(existsSync(join(src,'package-lock.json')))cpSync(join(src,'package-lock.json'
 const run=(cmd,args)=>{const p=spawnSync(cmd,args,{cwd:target,stdio:'inherit',shell:process.platform==='win32'});if(p.status!==0)throw new Error(cmd+' failed');};
 run('npm',[existsSync(join(target,'package-lock.json'))?'ci':'install','--no-audit','--no-fund']);
 rmSync(join(target,'www'),{recursive:true,force:true});cpSync(resolve(root,'dist'),join(target,'www'),{recursive:true});
+// Native entry does not register PWA service workers. Remove generated registration/cache files.
+for(const name of ['sw.js','registerSW.js','manifest.webmanifest'])rmSync(join(target,'www',name),{force:true});
 if(!existsSync(join(target,'android')))run('npx',['--no-install','cap','add','android']);
 cpSync(join(src,'overlay'),join(target,'android'),{recursive:true,force:true});
 const manifest=join(target,'android/app/src/main/AndroidManifest.xml');

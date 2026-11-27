@@ -1,3 +1,4 @@
+import { isAndroidRuntime } from '../storage/androidSnapshotStore';
 import React, { useState } from 'react';
 import { Download, Smartphone, X } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
@@ -10,7 +11,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ compact = fa
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showGuide, setShowGuide] = useState(false);
 
-  if (isInstalled) {
+  if (isAndroidRuntime() || isInstalled) {
     return null;
   }
 

@@ -4,7 +4,7 @@ import { decodeStoredState, type SnapshotStore, type StoredState } from './sqlit
 interface NativeLedgerBridge {
   initialize(options:{initialPayload:string}):Promise<void>;
   read():Promise<{revision:number;payload:string}>;
-  compareAndSwap(options:{revision:number;payload:string}):Promise<{committed:boolean}>;
+  compareAndSwap(options:{revision:string;payload:string}):Promise<{committed:boolean}>;
   minimize():Promise<void>;
 }
 type Runtime = {getPlatform?:()=>string;isNativePlatform?:()=>boolean;Plugins?:{LedgerStorage?:NativeLedgerBridge}};
@@ -30,6 +30,6 @@ export class AndroidSnapshotStore implements SnapshotStore {
   }
   async compareAndSwap(revision:number,state:StoredState){
     const payload=JSON.stringify(state);decodeStoredState(payload);
-    return (await bridge().compareAndSwap({revision,payload})).committed===true;
+    return (await bridge().compareAndSwap({revision:String(revision),payload})).committed===true;
   }
 }
