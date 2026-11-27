@@ -33,3 +33,6 @@ The separate native toolchain pins Capacitor 7.4.5 (Android SDK 35/JDK 21). The 
 
 ## Phase 4 security milestone
 Native schema v2 encrypts the snapshot payload with an AES-256-GCM Android Keystore key; v1 migration is transactional. The separate API vault uses a different Keystore key. Portable encrypted backup uses PBKDF2-SHA256 (600,000 iterations) and AES-GCM; Android Storage Access Framework exports a user-selected file. One rotating recovery checkpoint is committed atomically before destructive ledger operations. Restore previews require confirmation. Portable backups exclude AI configuration and credentials, include existing draft/preview data only. Device lock, original attachments, stable release signing and on-device migration/restore testing remain pending. A v1 upgrade does not guarantee old plaintext pages are securely erased. Do not use real financial data before acceptance.
+
+## Stable signing preparation
+An explicit-tag-only signed beta workflow is provided. Owner-controlled environment secrets and certificate fingerprint are required; no release key has been generated and no signed beta has been built. See [ANDROID_SIGNING.md](ANDROID_SIGNING.md).

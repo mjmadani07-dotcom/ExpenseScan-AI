@@ -1,0 +1,99 @@
+name: Android signed beta
+on:
+  push:
+    tags: ['android-beta-*']
+permissions:
+  contents: read
+concurrency:
+  group: expensescan-signed-beta
+  cancel-in-progress: false
+jobs:
+  signed:
+    runs-on: ubuntu-latest
+    environment: android-signing
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate release tag and source branch
+        shell: bash
+        run: |
+          git merge-base --is-ancestor HEAD origin/android
+          code="${GITHUB_REF_NAME#android-beta-}"
+          [[ "$code" =~ ^[1-9][0-9]{0,8}$ ]]
+          test "$code" -ge 100
+          echo "ANDROID_VERSION_CODE=$code" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verify Android SDK and install required components
+        shell: bash
+        run: |
+          echo "SDK: $ANDROID_HOME"
+          test -d "$ANDROID_HOME"
+          if [ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" ] || [ ! -x "$ANDROID_HOME/build-tools/35.0.0/apksigner" ]; then
+            sdkmanager --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0"
+          fi
+          test -f "$ANDROID_HOME/platforms/android-35/android.jar"
+          test -x "$ANDROID_HOME/build-tools/35.0.0/apksigner"
+      - name: Install web dependencies and verify
+        run: |
+          bun install --frozen-lockfile
+          bun run lint
+          bun run test
+      - name: Bundle Android web assets
+        env:
+          VITE_ANDROID_BUILD: 'true'
+        run: bun run build
+
+      - name: Generate Android project
+        run: node scripts/prepare-android.mjs
+      - name: Build unsigned release APK
+        working-directory: .android-build/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+      - name: Sign release with dedicated protected key
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          EXPECTED_CERT: ${{ vars.ANDROID_CERT_SHA256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KS_B64" && test -n "$KS_PASS" && test -n "$KEY_PASS" && test -n "$KEY_ALIAS" && test -n "$EXPECTED_CERT"
+          umask 077
+          ks="$(mktemp)"
+          trap 'rm -f "$ks"' EXIT
+          printf '%s' "$KS_B64" | base64 --decode > "$ks"
+          unset KS_B64
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          mkdir -p apk-output
+          unsigned=".android-build/android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          "$tools/zipalign" -f -P 16 4 "$unsigned" /tmp/aligned.apk
+          out="apk-output/ExpenseScan-${GITHUB_REF_NAME}.apk"
+          "$tools/apksigner" sign --ks "$ks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS --out "$out" /tmp/aligned.apk
+          "$tools/apksigner" verify --verbose --print-certs "$out" > /tmp/cert.txt
+          actual="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/cert.txt | tr '[:upper:]' '[:lower:]')"
+          expected="$(printf '%s' "$EXPECTED_CERT" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
+          test "$actual" = "$expected"
+          "$tools/aapt" dump badging "$out" > /tmp/badging.txt
+          grep -q "package: name='ir.expensescan.hesabyar' versionCode='$ANDROID_VERSION_CODE'" /tmp/badging.txt
+          if grep -q application-debuggable /tmp/badging.txt; then exit 1; fi
+          sha256sum "$out" > apk-output/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ExpenseScan-${{ github.ref_name }}
+          path: apk-output/
+          retention-days: 3
+          if-no-files-found: error
