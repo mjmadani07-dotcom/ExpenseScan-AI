@@ -52,7 +52,7 @@ public class LedgerStoragePlugin extends Plugin {
         return true;
     }
     @PluginMethod public synchronized void sessionStatus(PluginCall call){
-        JSObject r=new JSObject();r.put("unlocked",sessionValid() && foreground);r.put("deviceSecure",keyguard().isDeviceSecure());call.resolve(r);
+        JSObject r=new JSObject();r.put("unlocked",sessionValid());r.put("deviceSecure",keyguard().isDeviceSecure());call.resolve(r);
     }
     @PluginMethod public synchronized void noteActivity(PluginCall call){
         if(!requireSession(call))return;

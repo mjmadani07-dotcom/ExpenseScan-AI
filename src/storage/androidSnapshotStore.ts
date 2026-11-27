@@ -1,3 +1,4 @@
+import { toEnglishDigits } from '../utils/jalali';
 import { emptyLedger } from './ledgerDomain';
 import { decodeStoredState, type SnapshotStore, type StoredState } from './sqliteStore';
 
@@ -52,5 +53,5 @@ export const nativeLock=()=>bridge().lockApp();
 export const nativeActivity=()=>bridge().noteActivity();
 export async function nativeExportFile(name:string,data:Uint8Array,mime:string){
  let raw='';for(let i=0;i<data.length;i+=16384)raw+=String.fromCharCode(...data.subarray(i,i+16384));
- await bridge().saveExportFile({name,data:btoa(raw),mime});
+ await bridge().saveExportFile({name:toEnglishDigits(name),data:btoa(raw),mime});
 }

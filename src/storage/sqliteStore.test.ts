@@ -150,3 +150,14 @@ test('legacy single recovery is preserved in multi-version archive',async()=>{
  await repo.createRecovery();assert.equal((await repo.recoveryList()).length,2);
  }finally{db.close();}
 });
+
+test('native export normalizes Persian filename digits and preserves binary data',async()=>{
+ const {nativeExportFile}=await import('./androidSnapshotStore');
+ const g=globalThis as any, previous=g.Capacitor;let received:any;
+ try{
+ g.Capacitor={getPlatform:()=> 'android',Plugins:{LedgerStorage:{async saveExportFile(v:any){received=v;}}}};
+ await nativeExportFile('hesabyar-۱۴۰۵-۰۹-۰۶.xlsx',new Uint8Array([0,255,128,65]),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+ assert.equal(received.name,'hesabyar-1405-09-06.xlsx');
+ assert.deepEqual(Array.from(Uint8Array.from(atob(received.data),c=>c.charCodeAt(0))),[0,255,128,65]);
+ }finally{if(previous===undefined)delete g.Capacitor;else g.Capacitor=previous;}
+});
