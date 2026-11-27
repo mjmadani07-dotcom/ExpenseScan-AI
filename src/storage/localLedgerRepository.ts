@@ -9,20 +9,25 @@ import type { SnapshotStore,StoredState } from './sqliteStore';
 export class LocalLedgerRepository implements LedgerRepository {
   readonly mode='local' as const;
   private queue:Promise<unknown>=Promise.resolve();
+  private disposed=false;
+  dispose(){this.disposed=true;}
+  private assertOpen(){if(this.disposed)throw new Error('نشست دفتر پایان یافته است؛ دوباره وارد شوید.');}
   constructor(private readonly store:SnapshotStore,private readonly attachments?:AttachmentStore){}
-  private async ensureAttachments(ids:string[]){if(ids.length&&!this.attachments)throw new Error('محل نگهداری پیوست در دسترس نیست.');for(const id of ids)await verifyAttachment(id,await this.attachments!.get(id));}
+  private async ensureAttachments(ids:string[]){if(ids.length&&!this.attachments)throw new Error('محل نگهداری پیوست در دسترس نیست.');for(const id of ids){this.assertOpen();await verifyAttachment(id,await this.attachments!.get(id));this.assertOpen();}}
   initialize(){return this.store.initialize();}
-  private async active(){return this.store.readActive?this.store.readActive():(await this.store.read()).state;}
+  private async active(){this.assertOpen();const result=this.store.readActive?await this.store.readActive():(await this.store.read()).state;this.assertOpen();return result;}
   async loadActive(){await this.queue.catch(()=>{});const {ledger,draft}=await this.active();return {ledger,draft};}
   async load(){return (await this.loadActive()).ledger;}
   async aiStatus(){return null;}
   async loadDraft(){return (await this.loadActive()).draft;}
   private change<T>(fn:(domain:LedgerDomain,state:StoredState)=>T|Promise<T>):Promise<T>{
     const task=this.queue.catch(()=>{}).then(async()=>{
-      const {revision,state}=await this.store.read();
+      this.assertOpen();
+      const {revision,state}=await this.store.read();this.assertOpen();
       const domain=new LedgerDomain(state.ledger);
       const result=await fn(domain,state);
       state.ledger=domain.ledger;
+      this.assertOpen();
       if(!await this.store.compareAndSwap(revision,state))throw new Error('دفتر هم‌زمان تغییر کرده است؛ دوباره بارگذاری کنید.');
       return result;
     });
@@ -66,12 +71,13 @@ export class LocalLedgerRepository implements LedgerRepository {
     delete s.recovery;
   }
   exportStreamBackup(password:string,sink:ByteSink,progress?:Progress,signal?:AbortSignal){
-    const task=this.queue.catch(()=>{}).then(async()=>{const s=await this.active();return writeStreamBackup({ledger:s.ledger,draft:s.draft},password,this.attachments,sink,progress,signal);});
+    const task=this.queue.catch(()=>{}).then(async()=>{const s=await this.active();return writeStreamBackup({ledger:s.ledger,draft:s.draft},password,this.attachments,async bytes=>{this.assertOpen();await sink(bytes);this.assertOpen();},progress,signal);});
     this.queue=task;return task;
   }
   restoreStreamBackup(file:Blob,password:string,progress?:Progress,signal?:AbortSignal){
     return this.change(async(d,s)=>{
-      const clean=await readStreamBackup(file,password,this.attachments,progress,signal);
+      const files=this.attachments?{put:async(id:string,data:string)=>{this.assertOpen();await this.attachments!.put(id,data);this.assertOpen();}}:undefined;
+      const clean=await readStreamBackup(file,password,files,progress,signal);
       if(signal?.aborted)throw new Error('بازیابی لغو شد.');
       this.checkpoint(s);d.ledger={...clean.ledger,aiConfig:d.ledger.aiConfig};s.draft=clean.draft;s.lastApproval=undefined;
     });
@@ -80,14 +86,14 @@ export class LocalLedgerRepository implements LedgerRepository {
   cleanupAttachments(){
     const task=this.queue.catch(()=>{}).then(async()=>{
       if(!this.attachments?.cleanup)throw new Error('پاک‌سازی در این دستگاه در دسترس نیست.');
-      const {revision}=await this.store.read();return this.attachments.cleanup(revision);
+      this.assertOpen();const {revision}=await this.store.read();this.assertOpen();return this.attachments.cleanup(revision);
     });this.queue=task;return task;
   }
-  async attachmentAudit(){await this.queue.catch(()=>{});if(!this.attachments?.inventory)throw new Error('فهرست فایل‌های اصلی در دسترس نیست.');const s=(await this.store.read()).state;return auditAttachmentInventory(await this.attachments.inventory(),s);}
-  async recoveryList(){await this.queue.catch(()=>{});return ((await this.store.read()).state.recoveries??[]).map(r=>({id:r.id,createdAt:r.createdAt,count:r.ledger.expenses.length}));}
+  async attachmentAudit(){await this.queue.catch(()=>{});this.assertOpen();if(!this.attachments?.inventory)throw new Error('فهرست فایل‌های اصلی در دسترس نیست.');const s=(await this.store.read()).state;return auditAttachmentInventory(await this.attachments.inventory(),s);}
+  async recoveryList(){await this.queue.catch(()=>{});this.assertOpen();return ((await this.store.read()).state.recoveries??[]).map(r=>({id:r.id,createdAt:r.createdAt,count:r.ledger.expenses.length}));}
   async recoveryInfo(){return (await this.recoveryList())[0]??null;}
   createRecovery(){return this.change((_d,s)=>{this.checkpoint(s);});}
   deleteRecovery(id:string){return this.change((_d,s)=>{if(!s.recoveries?.some(r=>r.id===id))throw new Error('نسخه بازیابی یافت نشد.');s.recoveries=s.recoveries.filter(r=>r.id!==id);});}
-  restoreBackup(snapshot:BackupSnapshot){const clean=cleanBackup(snapshot);return this.change(async(d,s)=>{const entries=Object.entries(clean.attachments??{});if(entries.length&&!this.attachments)throw new Error('محل نگهداری پیوست در دسترس نیست.');for(const [id,data] of entries)await verifyAttachment(id,data);for(const [id,data] of entries)await this.attachments!.put(id,data);this.checkpoint(s);d.ledger={...clean.ledger,aiConfig:d.ledger.aiConfig};s.draft=clean.draft;s.lastApproval=undefined;});}
+  restoreBackup(snapshot:BackupSnapshot){const clean=cleanBackup(snapshot);return this.change(async(d,s)=>{const entries=Object.entries(clean.attachments??{});if(entries.length&&!this.attachments)throw new Error('محل نگهداری پیوست در دسترس نیست.');for(const [id,data] of entries)await verifyAttachment(id,data);for(const [id,data] of entries){this.assertOpen();await this.attachments!.put(id,data);}this.checkpoint(s);d.ledger={...clean.ledger,aiConfig:d.ledger.aiConfig};s.draft=clean.draft;s.lastApproval=undefined;});}
   restoreRecovery(id?:string){return this.change(async(d,s)=>{const r=id?s.recoveries?.find(x=>x.id===id):s.recoveries?.[0];if(!r)throw new Error('نسخه بازیابی موجود نیست.');await this.ensureAttachments(snapshotAttachmentIds(r.ledger,r.draft));this.checkpoint(s);d.ledger={...r.ledger,aiConfig:d.ledger.aiConfig};s.draft=r.draft;s.lastApproval=undefined;});}
 }

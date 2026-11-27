@@ -382,3 +382,24 @@ test('simultaneous repeated approval and simulated lost acknowledgement do not d
  assert.equal(a[0].id,b[0].id);assert.equal((await repo.load()).expenses.length,1);assert.equal(await repo.loadDraft(),null);
  }finally{db.close();}
 });
+
+test('stored records require stable identity and drafts reject unsafe preview URLs while allowing incomplete manual entry',async()=>{
+ const {decodeStoredState}=await import('./sqliteStore');const {emptyLedger}=await import('./ledgerDomain');
+ const ledger=emptyLedger(),draft={id:'manual',drafts:[{...expense,title:'',vendor:'',amount:0,tempId:'tmp',selected:true}],previewPages:[]};
+ assert.equal(decodeStoredState(JSON.stringify({ledger,draft})).draft?.drafts[0].amount,0);
+ assert.throws(()=>decodeStoredState(JSON.stringify({ledger,draft:{...draft,previewPages:['https://example.invalid/private']}})),/پیش‌نویس/);
+ assert.throws(()=>decodeStoredState(JSON.stringify({ledger,draft:{...draft,drafts:[draft.drafts[0],draft.drafts[0]]}})),/پیش‌نویس/);
+ assert.throws(()=>decodeStoredState(JSON.stringify({ledger:{...ledger,expenses:[expense]},draft:null})),/شناسه/);
+});
+test('disposing local repository rejects queued and in-flight writes before commit',async()=>{
+ const db=new DatabaseSync(':memory:');try{
+ const store=new SqliteSnapshotStore(driver(db)),repo=new LocalLedgerRepository(store);await repo.initialize();
+ let release!:()=>void,entered!:()=>void;
+ const enteredPromise=new Promise<void>(resolve=>{entered=resolve;}),barrier=new Promise<void>(resolve=>{release=resolve;});
+ const original=store.read.bind(store);store.read=async()=>{const result=await original();entered();await barrier;return result;};
+ const first=repo.add([expense]),second=repo.add([expense]);const results=Promise.allSettled([first,second]);
+ await enteredPromise;repo.dispose();release();assert.deepEqual((await results).map(x=>x.status),['rejected','rejected']);
+ assert.equal((await original()).state.ledger.expenses.length,0);
+ await assert.rejects(()=>repo.load(),/نشست/);
+ }finally{db.close();}
+});

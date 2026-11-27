@@ -1,6 +1,7 @@
 import type { LedgerData } from '../types/expense';
 import { emptyLedger, sanitizeAiConfig } from './ledgerDomain';
 import { parseAndValidateLedgerImport } from '../utils/finance';
+import { attachmentIds } from './attachments';
 import type { DraftSession } from './ledgerRepository';
 
 export type SqlValue=string|number|null;
@@ -29,14 +30,37 @@ export interface SnapshotStore {
 }
 
 const VERSION=1;
+const validId=(v:unknown):v is string=>typeof v==='string'&&v.trim().length>0&&v.length<=4096&&!v.includes('\u0000');
+const validTime=(v:unknown)=>typeof v==='string'&&Number.isFinite(Date.parse(v));
+const previewOk=(v:unknown)=>typeof v==='string'&&v.length<=20*1024*1024&&/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/i.test(v);
+function validateDraftSession(value:unknown):asserts value is DraftSession|null {
+  if(value===null)return;
+  const invalid=()=>{throw new Error('پیش‌نویس ذخیره‌شده نامعتبر است.');};
+  if(!value||typeof value!=='object'||Array.isArray(value))return invalid();
+  const d=value as DraftSession;
+  if(!validId(d.id)||!Array.isArray(d.drafts)||!Array.isArray(d.previewPages)||d.previewPages.some(x=>!previewOk(x)))return invalid();
+  const ids=new Set<string>();
+  for(const item of d.drafts){
+    if(!item||typeof item!=='object'||Array.isArray(item)||!validId(item.tempId)||ids.has(item.tempId)||typeof item.selected!=='boolean'||typeof item.title!=='string'||typeof item.vendor!=='string'||!Array.isArray(item.lineItems)||typeof item.amount!=='number'||!Number.isFinite(item.amount)||!['IRR','IRT','USD','EUR'].includes(item.currency)||!['image','pdf','text','text_file'].includes(item.sourceType)||(item.paymentTranches!==undefined&&!Array.isArray(item.paymentTranches))||(item.sourcePreviewUrl!==undefined&&!previewOk(item.sourcePreviewUrl)))return invalid();
+    ids.add(item.tempId);attachmentIds([item]);
+  }
+}
+function requireRecordIdentity(records:unknown[]){
+  for(const item of records){
+    const r=item as {id?:unknown;createdAt?:unknown;approvedAt?:unknown}|null;
+    if(!r||!validId(r.id)||!validTime(r.createdAt)||!validTime(r.approvedAt))throw new Error('شناسه یا زمان ثبت سند ذخیره‌شده نامعتبر است؛ اطلاعات تغییر نکردند.');
+  }
+}
 export function decodeStoredState(raw:string):StoredState {
   const state=JSON.parse(raw) as StoredState;
   if(!state||!state.ledger||!Array.isArray(state.ledger.expenses)||!Array.isArray(state.ledger.budgets)||!Array.isArray(state.ledger.categories)||!state.ledger.rates||!('draft' in state))throw new Error('پایگاه داده نامعتبر است؛ بازیابی لازم است.');
+  requireRecordIdentity(state.ledger.expenses);
   const validated=parseAndValidateLedgerImport(state.ledger);
-  if(state.draft!==null&&(!state.draft||typeof state.draft.id!=='string'||!Array.isArray(state.draft.drafts)||!Array.isArray(state.draft.previewPages)))throw new Error('پیش‌نویس ذخیره‌شده نامعتبر است.');
+  validateDraftSession(state.draft);
   if(state.lastApproval){
     const approval=state.lastApproval;
-    if(typeof approval.id!=='string'||!approval.id||!Array.isArray(approval.records)||!approval.records.length||approval.records.some(r=>!r||typeof r.id!=='string'||!r.id)||new Set(approval.records.map(r=>r.id)).size!==approval.records.length)throw new Error('شناسه تأیید نامعتبر است.');
+    if(!validId(approval.id)||!Array.isArray(approval.records)||!approval.records.length||new Set(approval.records.map(r=>r?.id)).size!==approval.records.length)throw new Error('شناسه تأیید نامعتبر است.');
+    requireRecordIdentity(approval.records);attachmentIds(approval.records);
   }
   if(state.recoveries!==undefined&&(!Array.isArray(state.recoveries)||state.recoveries.length>3))throw new Error('آرشیو بازیابی نامعتبر است.');
   const recoveries=state.recoveries??(state.recovery?[{...state.recovery,id:'legacy-'+state.recovery.createdAt}]:[]);

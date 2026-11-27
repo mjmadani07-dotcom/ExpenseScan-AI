@@ -28,3 +28,5 @@ Use a separate test phone and synthetic expenses. Record phone model, Android ve
 Do not deploy a failed or untested candidate to operational accounts. No production data or signing secrets in logs or Git.
 
 Candidate CI correction: explicit AVD home and startup preflight; corrected signature workflow formatting. All checkboxes remain unverified until the exact commit passes.
+
+Security hardening candidate: fail closed on missing stored record IDs/timestamps, invalid draft structure/duplicate draft IDs/nonlocal preview URLs; incomplete manual drafts remain allowed. Dispose local repository at lock to block queued/in-flight mutations before commit; suppress late capture results; native explicit lock invalidates pending authentication result. In-progress native commits may finish atomically before lock acknowledgement. Verify exact candidate CI and manual device acceptance before tag.

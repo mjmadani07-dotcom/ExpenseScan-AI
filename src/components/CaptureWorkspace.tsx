@@ -243,6 +243,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
 
       if(controller.signal.aborted)return;
       const attachment=localMode&&params.original&&params.sType!=='text'?await nativeAttachFile(params.original,params.sType):{};
+      if(controller.signal.aborted)return;
       const {createThumbnailDataUrl}=await import('../utils/pdfRenderer');
       const previewThumb = params.pages?.[0]
         ? await createThumbnailDataUrl(params.pages[0].dataUrl)
@@ -275,6 +276,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
         throw new Error('هیچ هزینه قابل ثبتی از این ورودی استخراج نشد.');
       }
 
+      if(controller.signal.aborted)return;
       onDraftsReady(
         drafts,
         localMode ? (previewThumb?[previewThumb]:[]) : (params.pages?.map((p) => p.dataUrl) ?? [])
@@ -379,6 +381,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
     const source=mode==='file_photo'?stagedFile?.original:originalText.current??undefined;
     const kind=mode==='file_photo'?stagedFile?.kind:source?'text_file':undefined;
     const attachment=localMode&&source&&kind?await nativeAttachFile(source,kind):{};
+    if(preparationCancelledRef.current)return;
     const today = businessDateIso();
     const defaultCategory = activeCategories.some((c) => c.id === 'operations')
       ? 'operations'

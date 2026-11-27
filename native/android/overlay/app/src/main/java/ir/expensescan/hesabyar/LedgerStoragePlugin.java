@@ -51,7 +51,7 @@ public class LedgerStoragePlugin extends Plugin {
     private static final long IDLE_MS=5*60*1000L;
     private static final long BACKGROUND_MS=30*1000L;
     private long lastActivity=0, stoppedAt=0;
-    private boolean unlocked=false, foreground=true, authPending=false;
+    private boolean unlocked=false, foreground=true, authPending=false, authCancelled=false;
 
     private KeyguardManager keyguard(){return (KeyguardManager)getContext().getSystemService(android.content.Context.KEYGUARD_SERVICE);}
     private synchronized boolean sessionValid(){
@@ -70,7 +70,7 @@ public class LedgerStoragePlugin extends Plugin {
         if(!requireSession(call))return;
         lastActivity=SystemClock.elapsedRealtime();call.resolve();
     }
-    @PluginMethod public synchronized void lockApp(PluginCall call){unlocked=false;call.resolve();}
+    @PluginMethod public synchronized void lockApp(PluginCall call){unlocked=false;if(authPending)authCancelled=true;call.resolve();}
     @Override protected synchronized void handleOnStop(){foreground=false;stoppedAt=SystemClock.elapsedRealtime();}
     @Override protected synchronized void handleOnResume(){sessionValid();foreground=true;stoppedAt=0;}
     @PluginMethod public synchronized void unlockBiometric(PluginCall call){
@@ -78,7 +78,7 @@ public class LedgerStoragePlugin extends Plugin {
         if(!keyguard().isDeviceSecure()||BiometricManager.from(getContext()).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)!=BiometricManager.BIOMETRIC_SUCCESS){
             call.reject("Strong biometric authentication unavailable; use device credential","BIOMETRIC_UNAVAILABLE");return;
         }
-        authPending=true;
+        authPending=true;authCancelled=false;
         getActivity().runOnUiThread(()->{
             try{
                 BiometricPrompt prompt=new BiometricPrompt(getActivity(),ContextCompat.getMainExecutor(getContext()),new BiometricPrompt.AuthenticationCallback(){
@@ -86,7 +86,7 @@ public class LedgerStoragePlugin extends Plugin {
                         synchronized(LedgerStoragePlugin.this){
                             if(!authPending)return;
                             authPending=false;
-                            if(!keyguard().isDeviceSecure()||!foreground){unlocked=false;call.reject("Authentication session expired");return;}
+                            if(authCancelled||!keyguard().isDeviceSecure()||!foreground){unlocked=false;call.reject("Authentication session expired");return;}
                             unlocked=true;lastActivity=SystemClock.elapsedRealtime();stoppedAt=0;call.resolve();
                         }
                     }
@@ -107,14 +107,14 @@ public class LedgerStoragePlugin extends Plugin {
         if(!keyguard().isDeviceSecure()){call.reject("Set a secure screen lock in Android settings first","NO_DEVICE_LOCK");return;}
         Intent prompt=keyguard().createConfirmDeviceCredentialIntent("حساب‌یار","برای ورود به دفتر مالی، قفل گوشی را تأیید کنید.");
         if(prompt==null){call.reject("Device credential prompt unavailable");return;}
-        authPending=true;
+        authPending=true;authCancelled=false;
         try{startActivityForResult(call,prompt,"unlockResult");}
         catch(Exception ex){authPending=false;call.reject("Cannot open credential prompt");}
     }
     @ActivityCallback private synchronized void unlockResult(PluginCall call,ActivityResult result){
-        authPending=false;
+        boolean valid=authPending&&!authCancelled;authPending=false;
         if(call==null)return;
-        if(result.getResultCode()!=Activity.RESULT_OK || !keyguard().isDeviceSecure()){unlocked=false;call.reject("Authentication cancelled or failed");return;}
+        if(!valid||result.getResultCode()!=Activity.RESULT_OK || !keyguard().isDeviceSecure()){unlocked=false;call.reject("Authentication cancelled or failed");return;}
         unlocked=true;lastActivity=SystemClock.elapsedRealtime();stoppedAt=0;foreground=true;call.resolve();
     }
 
