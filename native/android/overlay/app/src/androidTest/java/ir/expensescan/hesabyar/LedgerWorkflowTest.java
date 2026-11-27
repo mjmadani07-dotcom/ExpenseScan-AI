@@ -241,6 +241,25 @@ public class LedgerWorkflowTest {
             unlock(reopened);nav(reopened,"هزینه‌ها");text(reopened,EDITED);
             JSONObject persisted=record(reopened,EDITED,23456);assertEquals(id,persisted.getString("id"));assertEquals(attachment,persisted.getString("attachmentId"));
             openRecord(reopened,EDITED);click(reopened,"مشاهده فایل اصلی در حساب‌یار");text(reopened,"E2E original receipt");
+            // Synthetic baseline fingerprint stored in the test APK's separate
+            // preferences, not in the application ledger or release APK.
+            assertTrue(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getContext()
+                .getSharedPreferences("upgrade_fixture",android.content.Context.MODE_PRIVATE).edit()
+                .putString("id",id).putString("attachment",attachment).commit());
+        }
+    }
+    @Test public void verifyPreservedLedgerAfterUpgrade()throws Exception{
+        org.junit.Assume.assumeTrue("Run only after adb install -r",
+            "true".equals(androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("verifyUpgrade")));
+        assertTrue("Synthetic workflow must never run on a physical phone","1".equals(shell("getprop ro.kernel.qemu"))||"1".equals(shell("getprop ro.boot.qemu")));
+        android.content.SharedPreferences fixture=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getContext().getSharedPreferences("upgrade_fixture",android.content.Context.MODE_PRIVATE);
+        String id=fixture.getString("id",null),attachment=fixture.getString("attachment",null);
+        assertNotNull("Missing pre-upgrade fixture",id);assertNotNull(attachment);
+        try(ActivityScenario<MainActivity> app=ActivityScenario.launch(MainActivity.class)){
+            unlock(app);nav(app,"هزینه‌ها");text(app,EDITED);
+            JSONObject persisted=record(app,EDITED,23456);
+            assertEquals(id,persisted.getString("id"));assertEquals(attachment,persisted.getString("attachmentId"));
+            openRecord(app,EDITED);click(app,"مشاهده فایل اصلی در حساب‌یار");text(app,"E2E original receipt");
         }
     }
 }

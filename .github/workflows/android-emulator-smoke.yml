@@ -104,4 +104,19 @@ jobs:
           adb shell svc data disable
           chmod +x gradlew
           ./gradlew --no-daemon :app:connectedDebugAndroidTest
+          # Keep the same debug signer on this runner; increment the APK version
+          # and exercise Android's actual package update without removing app data.
+          signer="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          cert_before="$("$signer" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          test -n "$cert_before"
+          grep -Eq 'versionCode[[:space:]]+1([[:space:]]|$)' app/build.gradle
+          sed -i -E 's/versionCode[[:space:]]+1([[:space:]]|$)/versionCode 2\1/' app/build.gradle
+          ./gradlew --no-daemon :app:assembleDebug
+          cert_after="$("$signer" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          test "$cert_before" = "$cert_after"
+          adb install -r "$apk"
+          adb shell dumpsys package ir.expensescan.hesabyar | grep -E 'versionCode=2([[:space:]]|$)'
+          adb shell am instrument -w -e class ir.expensescan.hesabyar.LedgerWorkflowTest#verifyPreservedLedgerAfterUpgrade -e verifyUpgrade true ir.expensescan.hesabyar.test/androidx.test.runner.AndroidJUnitRunner | tee /tmp/expensescan-upgrade-result.txt
+          grep -F 'OK (1 test)' /tmp/expensescan-upgrade-result.txt
           # No APK or report artifacts uploaded; this job is intentionally opt-in on test changes.
