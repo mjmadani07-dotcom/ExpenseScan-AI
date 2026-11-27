@@ -215,7 +215,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
     try {
       const { downloadExpensesExcel } = await import('../utils/excelExport');
       const jalaliSlug = formatJalaliDate(businessDateIso()).replace(/\//g, '-');
-      downloadExpensesExcel(
+      await downloadExpensesExcel(
         filtered,
         budgets,
         rates,
@@ -223,7 +223,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
         `hesabyar-expenses-${jalaliSlug}.xlsx`,
         activeCategories
       );
-    } finally {
+    } catch(err) {setMutationError(err instanceof Error?err.message:'خطا در ذخیره Excel');} finally {
       setIsExportingExcel(false);
     }
   };

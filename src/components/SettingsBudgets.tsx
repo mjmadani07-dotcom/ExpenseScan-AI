@@ -660,8 +660,8 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
         <JsonSyncPanel
           expenses={expenses}
           categories={activeCategories}
-          budgets={localBudgets}
-          rates={localRates}
+          budgets={budgets}
+          rates={rates}
           onImportJson={onImportJson}
         />
       </section>

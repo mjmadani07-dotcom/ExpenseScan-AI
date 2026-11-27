@@ -36,3 +36,6 @@ Native schema v2 encrypts the snapshot payload with an AES-256-GCM Android Keyst
 
 ## Stable signing preparation
 An explicit-tag-only signed beta workflow is provided. Owner-controlled environment secrets and certificate fingerprint are required; no release key has been generated and no signed beta has been built. See [ANDROID_SIGNING.md](ANDROID_SIGNING.md).
+
+## Phase 4: device credential gate and file export
+Android now requires a secure device screen lock and explicit system credential confirmation on each app process start. Native session checks reject storage/vault/export calls when locked or expired; five minutes idle or 30 seconds stopped, explicit lock and FLAG_SECURE (screenshots/recent task protection). The native file chooser may expire the session during lengthy selection; retry after unlock. No custom PIN or biometric-specific prompt yet. Native JSON/XLSX use Storage Access Framework; these are intentionally plaintext exports, not encrypted backups. Test on real Android, including background transitions and file picker cancellation. No migration claim beyond CI compilation.

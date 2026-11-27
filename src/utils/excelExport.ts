@@ -1,3 +1,4 @@
+import { isAndroidRuntime,nativeExportFile } from '../storage/androidSnapshotStore';
 import { businessDateIso } from './jalali';
 import XLSX from 'xlsx-js-style';
 import type {
@@ -673,15 +674,16 @@ export function exportExpensesToXlsxBuffer(
   return out instanceof Uint8Array ? out : new Uint8Array(out);
 }
 
-export function downloadExpensesExcel(
+export async function downloadExpensesExcel(
   expenses: ExpenseRecord[],
   budgets: CategoryBudget[],
   rates: ExchangeRates,
   displayUnit: DisplayUnit,
   filename: string,
   categories?: CategoryDefinition[]
-): void {
+): Promise<void> {
   const bytes = exportExpensesToXlsxBuffer(expenses, budgets, rates, displayUnit, categories);
+  if(isAndroidRuntime()){await nativeExportFile(filename.endsWith('.xlsx')?filename:filename+'.xlsx',bytes,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');return;}
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   const blob = new Blob([copy.buffer], {

@@ -1,3 +1,4 @@
+import { isAndroidRuntime,nativeExportFile } from '../storage/androidSnapshotStore';
 import React, { useRef, useState } from 'react';
 import {
   AlertTriangle,
@@ -46,20 +47,24 @@ export const JsonSyncPanel: React.FC<JsonSyncPanelProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [resultStats, setResultStats] = useState<JsonImportStats | null>(null);
 
-  const handleExportJson = () => {
+  const [isExporting,setIsExporting]=useState(false);
+  const handleExportJson = async () => {
+    setIsExporting(true);setErrorMsg(null);try {
     const payload = JSON.stringify(
       { expenses, ...(categories ? { categories } : {}), budgets, rates },
       null,
       2
     );
+    const jDate = formatJalaliDate(businessDateIso()).replace(/\//g, '-');
+    if(isAndroidRuntime()){await nativeExportFile('hesabyar-ledger-'+jDate+'.json',new TextEncoder().encode(payload),'application/json');return;}
     const blob = new Blob([payload], { type: 'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const jDate = formatJalaliDate(businessDateIso()).replace(/\//g, '-');
     a.download = `hesabyar-ledger-${jDate}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    }catch(err){setErrorMsg(err instanceof Error?err.message:'خطا در ذخیره JSON');}finally{setIsExporting(false);}
   };
 
   const handleFileChange = async (file: File) => {
@@ -124,7 +129,8 @@ export const JsonSyncPanel: React.FC<JsonSyncPanelProps> = ({
 
         <button
           type="button"
-          onClick={handleExportJson}
+          disabled={isExporting}
+           onClick={handleExportJson}
           className="inline-flex items-center gap-2 min-h-[40px] px-4 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 hover:bg-slate-50 cursor-pointer shrink-0"
         >
           <Download className="w-4 h-4 text-teal-700" />

@@ -1,16 +1,14 @@
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
-import { AndroidSnapshotStore, isAndroidRuntime } from './storage/androidSnapshotStore';
-import { LocalLedgerRepository } from './storage/localLedgerRepository';
+import { isAndroidRuntime } from './storage/androidSnapshotStore';
+import { AndroidAuthGate } from './components/AndroidAuthGate';
 import './index.css';
 
 const root=createRoot(document.getElementById('root')!);
 async function start(){
   if(import.meta.env.VITE_ANDROID_BUILD==='true'||isAndroidRuntime()){
     if(!isAndroidRuntime())throw new Error('این بسته باید در برنامه اندروید اجرا شود.');
-    const repository=new LocalLedgerRepository(new AndroidSnapshotStore());
-    await repository.initialize();
-    root.render(<App repository={repository}/>);
+    root.render(<AndroidAuthGate/>);
   }else{
     const {registerSW}=await import('virtual:pwa-register');
     registerSW({immediate:true});

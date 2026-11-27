@@ -6,6 +6,11 @@ interface NativeLedgerBridge {
   read():Promise<{revision:number;payload:string}>;
   compareAndSwap(options:{revision:string;payload:string}):Promise<{committed:boolean}>;
   minimize():Promise<void>;
+  sessionStatus():Promise<{unlocked:boolean;deviceSecure:boolean}>;
+  unlockApp():Promise<void>;
+  lockApp():Promise<void>;
+  noteActivity():Promise<void>;
+  saveExportFile(options:{name:string;data:string;mime:string}):Promise<void>;
   loadKeys():Promise<{keys:string}>;
   saveKey(options:{provider:string;value:string}):Promise<{keys:string}>;
   saveBackupFile(options:{name:string;data:string}):Promise<void>;
@@ -40,3 +45,12 @@ export class AndroidSnapshotStore implements SnapshotStore {
 export async function nativeLoadKeys(){return JSON.parse((await bridge().loadKeys()).keys);}
 export async function nativeSaveKey(provider:string,value:string){return JSON.parse((await bridge().saveKey({provider,value})).keys);}
 export async function nativeSaveBackup(name:string,data:string){await bridge().saveBackupFile({name,data});}
+
+export const nativeSessionStatus=()=>bridge().sessionStatus();
+export const nativeUnlock=()=>bridge().unlockApp();
+export const nativeLock=()=>bridge().lockApp();
+export const nativeActivity=()=>bridge().noteActivity();
+export async function nativeExportFile(name:string,data:Uint8Array,mime:string){
+ let raw='';for(let i=0;i<data.length;i+=16384)raw+=String.fromCharCode(...data.subarray(i,i+16384));
+ await bridge().saveExportFile({name,data:btoa(raw),mime});
+}

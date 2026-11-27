@@ -58,7 +58,7 @@ const CACHE_KEY = 'hesabyar_ledger_cache_v1';
 const DISPLAY_UNIT_KEY = 'hesabyar_display_unit_v1';
 
 const webRepository = new WebLedgerRepository();
-export default function App({ repository = webRepository }: { repository?: LedgerRepository }) {
+export default function App({ repository = webRepository, onLock }: { repository?: LedgerRepository; onLock?:()=>void }) {
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit>(() => {
     try {
@@ -628,6 +628,7 @@ export default function App({ repository = webRepository }: { repository?: Ledge
 
             {activeTab === 'settings' && (
               <>
+              {onLock && <button type="button" onClick={onLock} className="block w-full max-w-4xl mx-auto mb-3 bg-slate-900 text-white rounded-xl p-3 text-sm">قفل فوری برنامه</button>}
               {repository.exportBackup && <BackupPanel repository={repository} onRestored={loadLedger}/>}
               <SettingsBudgets
                 displayUnit={displayUnit}
