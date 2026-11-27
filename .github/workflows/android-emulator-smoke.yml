@@ -7,6 +7,7 @@ on:
       - '.github/workflows/android-emulator-smoke.yml'
       - 'native/android/overlay/app/src/androidTest/**'
       - 'docs/ANDROID_RELEASE_CHECKLIST.md'
+      - 'scripts/prepare-android.mjs'
 permissions:
   contents: read
 concurrency:

@@ -35,6 +35,8 @@ writeFileSync(htmlFile,html);
 for(const name of ['sw.js','registerSW.js','manifest.webmanifest'])rmSync(join(target,'www',name),{force:true});
 if(!existsSync(join(target,'android')))run('npx',['--no-install','cap','add','android']);
 cpSync(join(src,'overlay'),join(target,'android'),{recursive:true,force:true});
+// Remove only Capacitor's generated sample tests, not application instrumentation.
+for(const kind of ['androidTest','test'])for(const pkg of ['com/getcapacitor/myapp','com/getcapacitor/app'])for(const name of ['ExampleInstrumentedTest.java','ExampleUnitTest.java'])rmSync(join(target,'android/app/src',kind,'java',pkg,name),{force:true});
 const manifest=join(target,'android/app/src/main/AndroidManifest.xml');
 let xml=readFileSync(manifest,'utf8').replace(/android:allowBackup="[^"]*"/,'android:allowBackup="false"');
 if(!xml.includes('android:allowBackup="false"'))xml=xml.replace('<application','<application android:allowBackup="false"');
