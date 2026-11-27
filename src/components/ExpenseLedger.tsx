@@ -126,6 +126,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
   const [viewOriginal,setViewOriginal]=useState<string|null>(null);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [isExportingPdf,setIsExportingPdf]=useState(false);
+  const [pdfNotice,setPdfNotice]=useState('');
   const [isMutating, setIsMutating] = useState(false);
   const [rateDraft, setRateDraft] = useState<number>(0);
   const [isEditingTranches, setIsEditingTranches] = useState(false);
@@ -222,8 +223,8 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
   };
 
   const handleExportPdf=async()=>{
-    setIsExportingPdf(true);
-    try{const {downloadExpensePdf}=await import('../utils/pdfReport');await downloadExpensePdf(filtered,rates,displayUnit,activeCategories,'گزارش دفتر هزینه‌ها','تمام اسناد مطابق فیلترهای جاری دفتر (نه فقط صفحه فعلی)');}
+    setIsExportingPdf(true);setPdfNotice('');setMutationError(null);
+    try{const {downloadExpensePdf}=await import('../utils/pdfReport');setPdfNotice(await downloadExpensePdf(filtered,rates,displayUnit,activeCategories,'گزارش دفتر هزینه‌ها','تمام اسناد مطابق فیلترهای جاری دفتر (نه فقط صفحه فعلی)')??'');}
     catch(err){setMutationError(err instanceof Error?err.message:'خطا در ذخیره PDF');}
     finally{setIsExportingPdf(false);}
   };
@@ -306,6 +307,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
 
   return (
     <div className="space-y-5">
+      {pdfNotice&&<p role="status" className="rounded-xl bg-teal-50 p-3 text-sm text-teal-800">{pdfNotice}</p>}
       {mutationError && <div role="alert" className="fixed bottom-24 left-4 right-4 z-[100] rounded-xl bg-red-100 border border-red-300 p-3 text-sm text-red-900 shadow-lg">{mutationError}<button type="button" className="mr-3 underline" onClick={() => setMutationError(null)}>بستن</button></div>}
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

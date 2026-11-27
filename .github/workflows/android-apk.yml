@@ -64,6 +64,8 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon :app:testDebugUnitTest
+      - name: Warn that this APK is CI-only and not an update
+        run: echo "::warning::Ephemeral debug signer. Never uninstall an installed copy to install this APK without a verified external backup. Use owner-signed preview or beta for real device upgrades."
       - name: Build debug APK
         working-directory: .android-build/android
         run: |

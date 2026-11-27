@@ -462,6 +462,7 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
         </div>
       )}
 
+      {localMode&&<p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">قبل از نصب نسخه جدید، پشتیبان رمزگذاری‌شده را خارج از برنامه نگهداری کنید. اگر اندروید تعارض نصب نشان داد، برنامه فعلی را حذف نکنید. نسخه‌های آزمایشی با امضای موقت قابل ارتقای مطمئن نیستند.</p>}
       {localMode && group('security','امنیت و پشتیبان‌گیری','قفل برنامه، نسخه‌های بازیابی و فایل پشتیبان',securityContent)}
       {/* Multi-AI Provider Settings */}
       {group("ai","هوش مصنوعی","مدل، آدرس اتصال و کلید API",(<section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">

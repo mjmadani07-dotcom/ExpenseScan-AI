@@ -53,7 +53,7 @@ if(!g.includes('androidx.test.uiautomator:uiautomator:'))g=g.replace(/dependenci
 const code=Number(process.env.ANDROID_VERSION_CODE||1);
 if(!Number.isSafeInteger(code)||code<1||code>2100000000)throw new Error('Invalid version code');
 const channel=process.env.ANDROID_RELEASE_CHANNEL||'alpha';
-if(channel!=='alpha'&&channel!=='beta')throw new Error('Invalid release channel');
+if(channel!=='alpha'&&channel!=='beta'&&channel!=='preview')throw new Error('Invalid release channel');
 g=g.replace(/versionCode\s+\d+/, 'versionCode '+code).replace(/versionName\s+"[^"]+"/,'versionName "0.1.0-'+channel+'.'+code+'"');
 writeFileSync(gradle,g);
 run('npx',['--no-install','cap','sync','android']);

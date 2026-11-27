@@ -82,7 +82,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
 }) => {
   const activeCategories = useMemo(() => resolveCategories(categories), [categories]);
   const [timeframe, setTimeframe] = useState<TimeframeFilter>('6m');
-  const [pdfBusy,setPdfBusy]=useState(false),[pdfError,setPdfError]=useState('');
+  const [pdfBusy,setPdfBusy]=useState(false),[pdfError,setPdfError]=useState(''),[pdfNotice,setPdfNotice]=useState('');
   const [selectedCategory, setSelectedCategory] = useState<ExpenseCategory | 'all'>('all');
   const [hoveredMonthKey, setHoveredMonthKey] = useState<string | null>(null);
 
@@ -250,7 +250,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
         </div>
       </div>
 
-      {isAndroidRuntime()&&<div className="flex flex-wrap gap-2 items-center"><button type="button" disabled={pdfBusy||!chartExpenses.length} className="min-h-11 border border-teal-600 text-teal-800 bg-white rounded-xl px-4 text-sm font-semibold disabled:opacity-40" onClick={async()=>{setPdfBusy(true);setPdfError('');try{const {downloadExpensePdf}=await import('../utils/pdfReport');await downloadExpensePdf(chartExpenses,rates,displayUnit,activeCategories,'گزارش هزینه‌های داشبورد',(TIMEFRAME_OPTIONS.find(x=>x.id===timeframe)?.label??'')+' · '+(selectedCategory==='all'?'همه حوزه‌ها':getCategoryLabel(selectedCategory,activeCategories)));}catch(e){setPdfError(e instanceof Error?e.message:'خطا در تهیه PDF');}finally{setPdfBusy(false);}}}>{pdfBusy?'در حال ساخت PDF…':'خروجی گزارش PDF'}</button>{pdfError&&<p role="alert" className="text-red-700 text-xs">{pdfError}</p>}</div>}
+      {isAndroidRuntime()&&<div className="flex flex-wrap gap-2 items-center"><button type="button" disabled={pdfBusy||!chartExpenses.length} className="min-h-11 border border-teal-600 text-teal-800 bg-white rounded-xl px-4 text-sm font-semibold disabled:opacity-40" onClick={async()=>{setPdfBusy(true);setPdfError('');setPdfNotice('');try{const {downloadExpensePdf}=await import('../utils/pdfReport');setPdfNotice(await downloadExpensePdf(chartExpenses,rates,displayUnit,activeCategories,'گزارش هزینه‌های داشبورد',(TIMEFRAME_OPTIONS.find(x=>x.id===timeframe)?.label??'')+' · '+(selectedCategory==='all'?'همه حوزه‌ها':getCategoryLabel(selectedCategory,activeCategories)))??'');}catch(e){setPdfError(e instanceof Error?e.message:'خطا در تهیه PDF');}finally{setPdfBusy(false);}}}>{pdfBusy?'در حال ساخت PDF…':'خروجی گزارش PDF'}</button>{pdfError&&<p role="alert" className="text-red-700 text-xs">{pdfError}</p>}{pdfNotice&&<p role="status" className="text-teal-800 text-xs">{pdfNotice}</p>}</div>}
       {/* Selected Category Filter Notice */}
       {selectedCategory !== 'all' && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-teal-50 border border-teal-200 px-4 py-3">

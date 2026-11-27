@@ -1,7 +1,7 @@
-name: Android signed beta
+name: Android signed beta and preview
 on:
   push:
-    tags: ['android-beta-*']
+    tags: ['android-beta-*', 'android-preview-*']
 permissions:
   contents: read
   actions: read
@@ -21,20 +21,23 @@ jobs:
         shell: bash
         run: |
           git merge-base --is-ancestor HEAD origin/android
-          code="${GITHUB_REF_NAME#android-beta-}"
+          channel="${GITHUB_REF_NAME#android-}"
+          channel="${channel%%-*}"
+          [[ "$channel" = beta || "$channel" = preview ]]
+          code="${GITHUB_REF_NAME#android-$channel-}"
           [[ "$code" =~ ^[1-9][0-9]{0,8}$ ]]
           test "$code" -ge 100
           echo "ANDROID_VERSION_CODE=$code" >> "$GITHUB_ENV"
-          echo "ANDROID_RELEASE_CHANNEL=beta" >> "$GITHUB_ENV"
+          echo "ANDROID_RELEASE_CHANNEL=$channel" >> "$GITHUB_ENV"
           # Release codes are monotonically increasing, even after a failed tag.
           while IFS= read -r tag; do
             [ "$tag" = "$GITHUB_REF_NAME" ] && continue
-            prior="${tag#android-beta-}"
+            prior="${tag##*-}"
             if [[ "$prior" =~ ^[1-9][0-9]{0,8}$ ]] && [ "$prior" -ge "$code" ]; then
-              echo "Release versionCode must exceed all previous beta tags."
+              echo "Release versionCode must exceed all previous signed preview and beta tags."
               exit 1
             fi
-          done < <(git tag --list 'android-beta-*')
+          done < <(git tag --list 'android-beta-*' 'android-preview-*')
       - name: Require successful CI for exact release commit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -43,7 +46,9 @@ jobs:
           set -euo pipefail
           sha="$(git rev-parse HEAD)"
           names="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$sha&status=success&per_page=100" --jq '.workflow_runs[] | select(.conclusion == "success" and .head_branch == "android") | .name')"
-          for check in "Android baseline checks" "Android experimental APK" "Android emulator smoke"; do
+          checks=("Android baseline checks" "Android experimental APK")
+          if [ "$ANDROID_RELEASE_CHANNEL" = beta ]; then checks+=("Android emulator smoke"); fi
+          for check in "${checks[@]}"; do
             if ! grep -Fxq "$check" <<< "$names"; then
               echo "Release blocked: $check has not succeeded for $sha on android."
               exit 1
@@ -114,8 +119,9 @@ jobs:
           expected="$(printf '%s' "$EXPECTED_CERT" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
           test "$actual" = "$expected"
           "$tools/aapt" dump badging "$out" > /tmp/badging.txt
-          grep -q "package: name='ir.expensescan.hesabyar' versionCode='$ANDROID_VERSION_CODE' versionName='0.1.0-beta.$ANDROID_VERSION_CODE'" /tmp/badging.txt
+          grep -q "package: name='ir.expensescan.hesabyar' versionCode='$ANDROID_VERSION_CODE' versionName='0.1.0-$ANDROID_RELEASE_CHANNEL.$ANDROID_VERSION_CODE'" /tmp/badging.txt
           if grep -q application-debuggable /tmp/badging.txt; then exit 1; fi
+          cp /tmp/cert.txt apk-output/SIGNER.txt
           sha256sum "$out" > apk-output/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:

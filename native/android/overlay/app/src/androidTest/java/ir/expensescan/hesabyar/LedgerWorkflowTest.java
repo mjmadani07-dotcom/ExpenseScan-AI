@@ -190,6 +190,19 @@ public class LedgerWorkflowTest {
             waitFor(app,"document.querySelector('#expense-detail-title')?.innerText==="+JSONObject.quote(EDITED),"Update did not complete");
             assertEquals(id,record(app,EDITED,23456).getString("id"));
             eval(app,"document.querySelector('button[aria-label=\"بستن جزئیات سند\"]').click()");
+            String pdf=buttons("خروجی گزارش PDF");waitFor(app,pdf,"PDF control unavailable");
+            eval(app,"(()=>{const b="+pdf+";setTimeout(()=>b.click(),100);return true})()");confirm();
+            text(app,"فایل PDF در Downloads/HesabYar ذخیره شد.");
+            String pdfPath=shell("find /sdcard/Download/HesabYar -maxdepth 1 -type f -name 'hesabyar-report-*.pdf' | head -n 1");
+            assertTrue("PDF missing",pdfPath.startsWith("/sdcard/Download/HesabYar/hesabyar-report-")&&pdfPath.endsWith(".pdf")&&!pdfPath.contains("'"));
+            byte[] pdfBytes=android.util.Base64.decode(shell("base64 '"+pdfPath+"'"),android.util.Base64.DEFAULT);
+            assertTrue("PDF was empty",pdfBytes.length>64);assertEquals("%PDF-",new String(pdfBytes,0,5,StandardCharsets.US_ASCII));
+            java.io.File copy=java.io.File.createTempFile("report-", ".pdf", androidx.test.core.app.ApplicationProvider.getApplicationContext().getCacheDir());
+            try{
+                try(java.io.FileOutputStream out=new java.io.FileOutputStream(copy)){out.write(pdfBytes);}
+                try(android.graphics.pdf.PdfRenderer renderer=new android.graphics.pdf.PdfRenderer(ParcelFileDescriptor.open(copy,ParcelFileDescriptor.MODE_READ_ONLY))){assertTrue(renderer.getPageCount()>0);}
+            }finally{copy.delete();}
+            assertEquals(id,record(app,EDITED,23456).getString("id"));
             nav(app,"تنظیمات");
             String security="document.querySelector(\'button[aria-controls=settings-security]\')";waitFor(app,security,"Security settings missing");eval(app,"("+security+").click()");
             String passwordSelector="section input[autocomplete=new-password]";
@@ -197,10 +210,10 @@ public class LedgerWorkflowTest {
             // Each password is in a different label; target the second via the input collection.
             eval(app,"(()=>{const e=document.querySelectorAll("+JSONObject.quote(passwordSelector)+")[1];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,"+JSONObject.quote(PASSWORD)+");e.dispatchEvent(new Event('input',{bubbles:true}));return true})()");
             String save=buttons("ذخیره فایل پشتیبان");waitFor(app,save,"Backup export control unavailable");
-            eval(app,"(()=>{const b="+save+";setTimeout(()=>b.click(),100);return true})()");saveDocument();
+            eval(app,"(()=>{const b="+save+";setTimeout(()=>b.click(),100);return true})()");
             text(app,"فایل پشتیبان رمزگذاری‌شده ذخیره شد.");
-            String path=shell("find /sdcard/Download -maxdepth 1 -type f -name 'ExpenseScan-*.esbackup2' | head -n 1");
-            assertTrue("SAF backup not found in Downloads",path.startsWith("/sdcard/Download/ExpenseScan-")&&path.endsWith(".esbackup2")&&!path.contains("'"));
+            String path=shell("find /sdcard/Download/HesabYar -maxdepth 1 -type f -name 'ExpenseScan-*.esbackup2' | head -n 1");
+            assertTrue("Verified backup not found in Downloads",path.startsWith("/sdcard/Download/HesabYar/ExpenseScan-")&&path.endsWith(".esbackup2")&&!path.contains("'"));
             encoded=shell("base64 '"+path+"'").replaceAll("\\s","");
             byte[] archive=android.util.Base64.decode(encoded,android.util.Base64.DEFAULT);
             assertTrue(archive.length>52);assertEquals("ESBACK2\n",new String(archive,0,8,StandardCharsets.UTF_8));
