@@ -37,7 +37,7 @@ export function partitionLedger(input:StoredState):LedgerRow[]{
  if(s.lastApproval)push('approval','last',s.lastApproval);
  return rows;
 }
-export function assembleLedger(rows:LedgerRow[]):StoredState{
+export function assembleLedger(rows:LedgerRow[],scope:'all'|'active'='all'):StoredState{
  if(!Array.isArray(rows))return fail();
  const map=new Map<string,LedgerRow>();
  for(const r of rows){if(!r||!ROW_TABLES.includes(r.table)||!validId(r.id)||typeof r.data!=='string'||(r.parent!==null&&!validId(r.parent))||map.has(key(r.table,r.id)))fail();map.set(key(r.table,r.id),r);}
@@ -56,9 +56,11 @@ export function assembleLedger(rows:LedgerRow[]):StoredState{
  const categories=ids(m.categoryIds).map(id=>{const c=take('categories',id);if(c?.id!==id)fail();return c;});
  const budgets=ids(m.budgetIds).map(id=>{const b=take('budgets',id);if(b?.category!==id)fail();return b;});
  const ledger:LedgerData={expenses,categories,budgets,rates:{USD:take('rates','USD'),EUR:take('rates','EUR')},aiConfig:m.aiConfig};
- const recoveries=ids(m.recoveryIds).map(id=>{const r=take('recoveries',id);if(r?.id!==id)fail();return r;});
- const draft=m.hasDraft?take('drafts','active'):null,lastApproval=m.hasApproval?take('approval','last'):undefined;
- if((m.hasDraft&&!draft)||(m.hasApproval&&!lastApproval)||map.size)fail();
+ const recoveryIds=ids(m.recoveryIds);
+ if(recoveryIds.length>3)fail();
+ const recoveries=scope==='all'?recoveryIds.map(id=>{const r=take('recoveries',id);if(r?.id!==id)fail();return r;}):[];
+ const draft=m.hasDraft?take('drafts','active'):null,lastApproval=scope==='all'&&m.hasApproval?take('approval','last'):undefined;
+ if((m.hasDraft&&!draft)||(scope==='all'&&m.hasApproval&&!lastApproval)||map.size)fail();
  return decodeStoredState(JSON.stringify({ledger,draft,recoveries,lastApproval}));
 }
 export function diffLedgerRows(before:LedgerRow[],after:LedgerRow[]):RowPatch{

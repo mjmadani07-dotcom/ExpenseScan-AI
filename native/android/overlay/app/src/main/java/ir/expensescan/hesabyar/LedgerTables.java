@@ -47,8 +47,15 @@ final class LedgerTables {
         }
     }
     static JSONArray read(SQLiteDatabase db,Codec codec)throws Exception {
+        return read(db,codec,false);
+    }
+    static boolean includeTable(String table,boolean activeOnly){
+        return !activeOnly||(!"recoveries".equals(table)&&!"approval".equals(table));
+    }
+    static JSONArray read(SQLiteDatabase db,Codec codec,boolean activeOnly)throws Exception {
         JSONArray rows=new JSONArray();
         for(String t:TABLES){
+            if(!includeTable(t,activeOnly))continue;
             // Do not put large encrypted values in a CursorWindow.
             try(Cursor c=db.rawQuery("SELECT row_id,parent_id FROM "+name(t)+" ORDER BY row_id",null)){
                 while(c.moveToNext()){

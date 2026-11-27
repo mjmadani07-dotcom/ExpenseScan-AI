@@ -204,6 +204,8 @@ public class LedgerStoragePlugin extends Plugin {
         if(!requireSession(call))return;
         try (SQLiteDatabase db = open()) {
             int schema=db.getVersion();
+            String scope=call.getString("scope","all");
+            if(!"active".equals(scope)&&!"all".equals(scope))throw new IllegalArgumentException("Invalid read scope");
             if(schema!=SCHEMA&&schema!=LedgerTables.VERSION)throw new IllegalStateException("Unsupported database schema");
             JSObject result=new JSObject();
             db.beginTransaction();
@@ -214,7 +216,8 @@ public class LedgerStoragePlugin extends Plugin {
                     result.put("payload",decrypt(LEDGER_KEY,readPayload(db)));
                 }else{
                     result.put("revision",LedgerTables.revision(db,"ledger_revision"));
-                    result.put("rows",LedgerTables.read(db,rowCodec()).toString());
+                    result.put("scope",scope);
+                    result.put("rows",LedgerTables.read(db,rowCodec(),"active".equals(scope)).toString());
                 }
                 db.setTransactionSuccessful();
             }finally{db.endTransaction();}

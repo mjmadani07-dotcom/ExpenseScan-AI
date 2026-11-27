@@ -12,9 +12,11 @@ export class LocalLedgerRepository implements LedgerRepository {
   constructor(private readonly store:SnapshotStore,private readonly attachments?:AttachmentStore){}
   private async ensureAttachments(ids:string[]){if(ids.length&&!this.attachments)throw new Error('محل نگهداری پیوست در دسترس نیست.');for(const id of ids)await verifyAttachment(id,await this.attachments!.get(id));}
   initialize(){return this.store.initialize();}
-  async load(){await this.queue.catch(()=>{});return (await this.store.read()).state.ledger;}
+  private async active(){return this.store.readActive?this.store.readActive():(await this.store.read()).state;}
+  async loadActive(){await this.queue.catch(()=>{});const {ledger,draft}=await this.active();return {ledger,draft};}
+  async load(){return (await this.loadActive()).ledger;}
   async aiStatus(){return null;}
-  async loadDraft(){await this.queue.catch(()=>{});return (await this.store.read()).state.draft;}
+  async loadDraft(){return (await this.loadActive()).draft;}
   private change<T>(fn:(domain:LedgerDomain,state:StoredState)=>T|Promise<T>):Promise<T>{
     const task=this.queue.catch(()=>{}).then(async()=>{
       const {revision,state}=await this.store.read();
@@ -53,7 +55,7 @@ export class LocalLedgerRepository implements LedgerRepository {
     delete s.recovery;
   }
   exportStreamBackup(password:string,sink:ByteSink,progress?:Progress,signal?:AbortSignal){
-    const task=this.queue.catch(()=>{}).then(async()=>{const {state:s}=await this.store.read();return writeStreamBackup({ledger:s.ledger,draft:s.draft},password,this.attachments,sink,progress,signal);});
+    const task=this.queue.catch(()=>{}).then(async()=>{const s=await this.active();return writeStreamBackup({ledger:s.ledger,draft:s.draft},password,this.attachments,sink,progress,signal);});
     this.queue=task;return task;
   }
   restoreStreamBackup(file:Blob,password:string,progress?:Progress,signal?:AbortSignal){
@@ -63,7 +65,7 @@ export class LocalLedgerRepository implements LedgerRepository {
       this.checkpoint(s);d.ledger={...clean.ledger,aiConfig:d.ledger.aiConfig};s.draft=clean.draft;s.lastApproval=undefined;
     });
   }
-  async exportBackup(){await this.queue.catch(()=>{});const s=(await this.store.read()).state;const ids=snapshotAttachmentIds(s.ledger,s.draft);const attachments:Record<string,string>={};let total=0;if(ids.length&&!this.attachments)throw new Error('محل نگهداری پیوست در دسترس نیست.');for(const id of ids){const data=await this.attachments!.get(id);await verifyAttachment(id,data);total+=data.length;if(total>28*1024*1024)throw new Error('مجموع پیوست‌ها از ظرفیت فعلی فایل پشتیبان بیشتر است؛ هیچ فایل ناقصی ایجاد نشد.');attachments[id]=data;}return cleanBackup({ledger:s.ledger,draft:s.draft,attachments});}
+  async exportBackup(){await this.queue.catch(()=>{});const s=await this.active();const ids=snapshotAttachmentIds(s.ledger,s.draft);const attachments:Record<string,string>={};let total=0;if(ids.length&&!this.attachments)throw new Error('محل نگهداری پیوست در دسترس نیست.');for(const id of ids){const data=await this.attachments!.get(id);await verifyAttachment(id,data);total+=data.length;if(total>28*1024*1024)throw new Error('مجموع پیوست‌ها از ظرفیت فعلی فایل پشتیبان بیشتر است؛ هیچ فایل ناقصی ایجاد نشد.');attachments[id]=data;}return cleanBackup({ledger:s.ledger,draft:s.draft,attachments});}
   cleanupAttachments(){
     const task=this.queue.catch(()=>{}).then(async()=>{
       if(!this.attachments?.cleanup)throw new Error('پاک‌سازی در این دستگاه در دسترس نیست.');

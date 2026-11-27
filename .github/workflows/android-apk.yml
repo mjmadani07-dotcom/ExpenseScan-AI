@@ -7,20 +7,13 @@ on:
       - '.github/workflows/android-apk.yml'
       - 'native/android/**'
       - 'scripts/prepare-android.mjs'
-      # Rebuild on user-facing native backup/export changes; keep artifacts short-lived.
-      - 'src/components/BackupPanel.tsx'
-      - 'src/storage/androidSnapshotStore.ts'
-      - 'src/storage/attachments.ts'
-      - 'src/components/CaptureWorkspace.tsx'
-      - 'src/components/ExpenseLedger.tsx'
-      - 'src/storage/portableBackup.ts'
-      - 'src/storage/streamBackup.ts'
-      - 'src/storage/localLedgerRepository.ts'
-      - 'src/storage/ledgerRows.ts'
-      - 'src/components/DraftReviewPanel.tsx'
-      - 'src/components/SettingsBudgets.tsx'
-      - 'src/utils/clientAiExtract.ts'
-      - 'src/App.tsx'
+      # Cover all runtime changes, not documentation-only changes; expire debug artifacts quickly.
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'bun.lock*'
+      - 'vite.config.*'
 permissions:
   contents: read
 concurrency:

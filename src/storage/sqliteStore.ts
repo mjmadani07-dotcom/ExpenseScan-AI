@@ -24,6 +24,7 @@ export interface VersionedState { revision:number; state:StoredState; }
 export interface SnapshotStore {
   initialize():Promise<void>;
   read():Promise<VersionedState>;
+  readActive?():Promise<Pick<StoredState,'ledger'|'draft'>>;
   compareAndSwap(revision:number,state:StoredState):Promise<boolean>;
 }
 

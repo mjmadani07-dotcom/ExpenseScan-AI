@@ -5,6 +5,7 @@ export interface DraftSession { id:string; drafts:ExtractedExpenseDraft[]; previ
 export interface LedgerRepository {
   readonly mode:'web'|'local';
   load():Promise<LedgerData>;
+  loadActive?():Promise<{ledger:LedgerData;draft:DraftSession|null}>;
   aiStatus():Promise<AiProviderStatus|null>;
   add(items:ExpenseFields[], draftId?:string):Promise<ExpenseRecord[]>;
   update(id:string,patch:Partial<ExpenseFields>):Promise<ExpenseRecord>;

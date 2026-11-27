@@ -120,7 +120,11 @@ export default function App({ repository = webRepository, onLock }: { repository
   const loadLedger = useCallback(async () => {
     setLoadError(null);
     try {
-      const [data, statusData, recovered] = await Promise.all([repository.load(), repository.aiStatus(), repository.loadDraft ? repository.loadDraft() : Promise.resolve(null)]);
+      const [active,statusData]=await Promise.all([
+        repository.loadActive?repository.loadActive():Promise.all([repository.load(),repository.loadDraft?repository.loadDraft():Promise.resolve(null)]).then(([ledger,draft])=>({ledger,draft})),
+        repository.aiStatus(),
+      ]);
+      const {ledger:data,draft:recovered}=active;
       if (repository.mode === 'local') {
         draftRef.current = recovered;
         setPendingDrafts(recovered?.drafts ?? null);

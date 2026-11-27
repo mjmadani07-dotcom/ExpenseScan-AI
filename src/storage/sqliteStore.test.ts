@@ -96,7 +96,7 @@ test('Android bridge uses exact revision string, validates snapshots and fails c
     let payload='',rev=0,schema=2;const rows=new Map<string,any>();const patches:any[]=[];
     global.Capacitor={getPlatform:()=> 'android',Plugins:{LedgerStorage:{
       async initialize(v:any){if(!payload)payload=v.initialPayload;},
-      async read(){return schema===2?{revision:rev,schema,payload}:{revision:rev,schema,rows:JSON.stringify([...rows.values()])};},
+      async read(v:any){const scope=v?.scope??'all';return schema===2?{revision:rev,schema,payload}:{revision:rev,schema,scope,rows:JSON.stringify([...rows.values()].filter(x=>scope!=='active'||!['recoveries','approval'].includes(x.table)))};},
       async commitRows(v:any){assert.equal(typeof v.revision,'string');if(v.revision!==String(rev))return {committed:false};const patch=JSON.parse(v.patch);patches.push(patch);for(const x of patch.deletes)rows.delete(JSON.stringify([x.table,x.id]));for(const x of patch.upserts)rows.set(JSON.stringify([x.table,x.id]),x);schema=3;rev++;return {committed:true};}
     }}};
     const store=new AndroidSnapshotStore();await store.initialize();
@@ -305,4 +305,32 @@ test('native stream backup staging splits binary data into bounded chunks and di
  assert.deepEqual(lens,[1048576,1048576,3]);assert.deepEqual(calls,['begin','finish','discard']);
  calls.length=0;await assert.rejects(()=>nativeWriteStreamBackup('ExpenseScan.esbackup2',async()=>{throw Error('failed');}),/failed/);assert.deepEqual(calls,['begin','discard']);
  }finally{if(previous===undefined)delete g.Capacitor;else g.Capacitor=previous;}
+});
+
+
+test('active-only read omits recovery payloads and approval without altering full writes',async()=>{
+ const {AndroidSnapshotStore}=await import('./androidSnapshotStore');
+ const {partitionLedger}=await import('./ledgerRows');const {emptyLedger}=await import('./ledgerDomain');
+ const date='2026-11-27T00:00:00Z',ledger=emptyLedger();
+ const created={...expense,id:'doc',createdAt:date,approvedAt:date};
+ ledger.expenses=[created];
+ const original=partitionLedger({ledger,draft:null,lastApproval:{id:'draft',records:[created]},recoveries:[{id:'r',createdAt:date,ledger:structuredClone(ledger),draft:null}]});
+ const g=globalThis as any,previous=g.Capacitor;let rev=7;const scopes:string[]=[];const rows=new Map(original.map(r=>[JSON.stringify([r.table,r.id]),r]));
+ try{
+ g.Capacitor={getPlatform:()=> 'android',Plugins:{LedgerStorage:{async initialize(){},async read({scope}:any){scopes.push(scope);return {revision:rev,schema:3,scope,rows:JSON.stringify([...rows.values()].filter(x=>scope==='all'||!['recoveries','approval'].includes(x.table)))};},async commitRows(v:any){assert.equal(v.revision,String(rev));const p=JSON.parse(v.patch);for(const x of p.deletes)rows.delete(JSON.stringify([x.table,x.id]));for(const x of p.upserts)rows.set(JSON.stringify([x.table,x.id]),x);rev++;return {committed:true};}}}};
+ const repo=new LocalLedgerRepository(new AndroidSnapshotStore());await repo.initialize();const active=await repo.loadActive();assert.equal(active.ledger.expenses.length,1);assert.deepEqual(scopes,['active','active']);
+ await repo.update('doc',{amount:20000});assert.equal(scopes.at(-1),'all');assert.equal(rows.get(JSON.stringify(['recoveries','r']))?.data,original.find(x=>x.table==='recoveries')?.data);
+ assert.equal(rows.get(JSON.stringify(['approval','last']))?.data,original.find(x=>x.table==='approval')?.data);
+ assert.equal((await repo.load()).expenses[0].amount,20000);
+ }finally{if(previous===undefined)delete g.Capacitor;else g.Capacitor=previous;}
+});
+test('large ledger active projection preserves 3000 documents, amounts and ordering without archive payloads',async()=>{
+ const {partitionLedger,assembleLedger,diffLedgerRows}=await import('./ledgerRows');const {emptyLedger}=await import('./ledgerDomain');
+ const date='2026-11-27T00:00:00Z',ledger=emptyLedger();
+ ledger.expenses=Array.from({length:3000},(_,i)=>({...expense,id:'doc-'+i,amount:i+1,createdAt:date,approvedAt:date,lineItems:[{description:'item',quantity:1,unitPrice:i+1,totalPrice:i+1}]}));
+ const state={ledger,draft:null,recoveries:[{id:'r1',createdAt:date,ledger:structuredClone(ledger),draft:null},{id:'r2',createdAt:date,ledger:structuredClone(ledger),draft:null}]};
+ const rows=partitionLedger(state),activeRows=rows.filter(x=>!['recoveries','approval'].includes(x.table));
+ const active=assembleLedger(activeRows,'active');assert.equal(active.ledger.expenses.length,3000);assert.deepEqual(active.ledger.expenses.map(x=>x.id),ledger.expenses.map(x=>x.id));assert.equal(active.ledger.expenses.reduce((n,x)=>n+x.amount,0),4501500);
+ assert.ok(JSON.stringify(activeRows).length<JSON.stringify(rows).length);assert.throws(()=>assembleLedger(activeRows),/نامعتبر/);assert.throws(()=>assembleLedger(rows,'active'),/نامعتبر/);
+ const changed=structuredClone(state);changed.ledger.expenses[1500].title='Changed';const patch=diffLedgerRows(rows,partitionLedger(changed));assert.deepEqual(patch.upserts.map(x=>x.table),['expenses']);assert.equal(patch.deletes.length,0);
 });

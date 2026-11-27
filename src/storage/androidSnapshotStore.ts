@@ -6,7 +6,7 @@ import { decodeStoredState, type SnapshotStore, type StoredState } from './sqlit
 
 interface NativeLedgerBridge {
   initialize(options:{initialPayload:string}):Promise<void>;
-  read():Promise<{revision:number;schema:number;payload?:string;rows?:string}>;
+  read(options?:{scope:'all'|'active'}):Promise<{revision:number;schema:number;scope?:'all'|'active';payload?:string;rows?:string}>;
   commitRows(options:{revision:string;patch:string;migration:boolean}):Promise<{committed:boolean}>;
   minimize():Promise<void>;
   sessionStatus():Promise<{unlocked:boolean;deviceSecure:boolean;biometricAvailable?:boolean}>;
@@ -42,7 +42,7 @@ export class AndroidSnapshotStore implements SnapshotStore {
   private baseline:{revision:number;rows:LedgerRow[]}|null=null;
   async initialize(){
     await bridge().initialize({initialPayload:JSON.stringify({ledger:emptyLedger(),draft:null})});
-    const row=await bridge().read();
+    const row=await bridge().read({scope:'active'});
     if(!Number.isSafeInteger(row.revision)||row.revision<0)throw new Error('نسخه دفتر معتبر نیست.');
     if(row.schema===2){
       if(typeof row.payload!=='string')throw new Error('دفتر قبلی قابل خواندن نیست.');
@@ -50,12 +50,19 @@ export class AndroidSnapshotStore implements SnapshotStore {
       if(canonicalJson(assembleLedger(rows))!==canonicalJson(old))throw new Error('مهاجرت دفتر بدون تغییر داده‌ها تأیید نشد.');
       const result=await bridge().commitRows({revision:String(row.revision),migration:true,patch:JSON.stringify(diffLedgerRows([],rows))});
       if(!result.committed)throw new Error('دفتر هم‌زمان تغییر کرد؛ مهاجرت را دوباره انجام دهید.');
-    }else if(row.schema!==3)throw new Error('نسخه پایگاه داده پشتیبانی نمی‌شود.');
-    await this.read();
+      await this.read(); // verify the complete migrated state before returning
+    }else if(row.schema===3){this.decodeActive(row);}
+    else throw new Error('نسخه پایگاه داده پشتیبانی نمی‌شود.');
   }
+  private decodeActive(row:Awaited<ReturnType<NativeLedgerBridge['read']>>){
+    if(!Number.isSafeInteger(row.revision)||row.revision<0||row.schema!==3||row.scope!=='active'||typeof row.rows!=='string')throw new Error('نمای فعال دفتر نامعتبر است.');
+    const {ledger,draft}=assembleLedger(JSON.parse(row.rows),'active');
+    return {ledger,draft}; // never seed the full-write baseline with a partial read
+  }
+  async readActive(){return this.decodeActive(await bridge().read({scope:'active'}));}
   async read(){
-    const row=await bridge().read();
-    if(!Number.isSafeInteger(row.revision)||row.revision<0||row.schema!==3||typeof row.rows!=='string')throw new Error('نسخه دفتر معتبر نیست.');
+    const row=await bridge().read({scope:'all'});
+    if(!Number.isSafeInteger(row.revision)||row.revision<0||row.schema!==3||row.scope!=='all'||typeof row.rows!=='string')throw new Error('نسخه دفتر معتبر نیست.');
     const rows=JSON.parse(row.rows) as LedgerRow[];
     const state=assembleLedger(rows);
     this.baseline={revision:row.revision,rows};
