@@ -325,9 +325,44 @@ public class LedgerWorkflowTest {
     }
     private byte[] readReportFile(String extension)throws Exception{
         if(!"pdf".equals(extension)&&!"xlsx".equals(extension))throw new IllegalArgumentException("extension");
-        String path=shell("find /sdcard/Download/HesabYar -maxdepth 1 -type f -name 'hesabyar-consolidated-*."+extension+"' | head -n 1");
-        assertTrue("Report file missing",path.startsWith("/sdcard/Download/HesabYar/hesabyar-consolidated-")&&path.endsWith("."+extension)&&!path.contains("'"));
-        return android.util.Base64.decode(shell("base64 '"+path+"'"),android.util.Base64.DEFAULT);
+        // Verify the actual published MediaStore download as its owning app.
+        // Shell/FUSE visibility is not the contract of Android scoped storage.
+        android.content.Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        android.content.ContentResolver resolver=context.getContentResolver();
+        android.net.Uri collection=android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI;
+        String id=android.provider.MediaStore.MediaColumns._ID;
+        String name=android.provider.MediaStore.MediaColumns.DISPLAY_NAME;
+        String path=android.provider.MediaStore.MediaColumns.RELATIVE_PATH;
+        String pending=android.provider.MediaStore.MediaColumns.IS_PENDING;
+        String size=android.provider.MediaStore.MediaColumns.SIZE;
+        String mime=android.provider.MediaStore.MediaColumns.MIME_TYPE;
+        String expectedMime="pdf".equals(extension)?"application/pdf":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        String relativePath=android.os.Environment.DIRECTORY_DOWNLOADS+"/HesabYar/";
+        String selection=name+" LIKE ? AND "+path+" = ? AND "+pending+" = ?";
+        String[] args={"hesabyar-consolidated-%."+extension,relativePath,"0"};
+        long deadline=android.os.SystemClock.elapsedRealtime()+10000;
+        do{
+            try(android.database.Cursor cursor=resolver.query(collection,new String[]{id,name,path,pending,size,mime},selection,args,null)){
+                assertNotNull("Downloads query failed",cursor);
+                if(cursor.moveToFirst()){
+                    assertEquals("Unexpected number of published reports",1,cursor.getCount());
+                    assertEquals(relativePath,cursor.getString(2));
+                    assertEquals(0,cursor.getInt(3));
+                    long expected=cursor.getLong(4);
+                    assertTrue("Empty published report",expected>0);
+                    assertEquals(expectedMime,cursor.getString(5));
+                    android.net.Uri uri=android.content.ContentUris.withAppendedId(collection,cursor.getLong(0));
+                    try(InputStream input=resolver.openInputStream(uri)){
+                        assertNotNull("Published report cannot be opened",input);
+                        byte[] bytes=input.readAllBytes();
+                        assertEquals("Published report size mismatch",expected,(long)bytes.length);
+                        return bytes;
+                    }
+                }
+            }
+            Thread.sleep(250);
+        }while(android.os.SystemClock.elapsedRealtime()<deadline);
+        throw new AssertionError("Published "+extension+" report missing from MediaStore Downloads/HesabYar");
     }
     @Test public void multiLedgerCatalogAndScopedCapture()throws Exception{
         unlockDeviceScreen();
