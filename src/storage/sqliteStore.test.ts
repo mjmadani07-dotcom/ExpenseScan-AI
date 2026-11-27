@@ -251,3 +251,27 @@ test('cleanup bridge passes only exact committed revision, not a client orphan l
  await assert.rejects(()=>androidAttachments.cleanup!(-1),/نامعتبر/);
  }finally{if(previous===undefined)delete g.Capacitor;else g.Capacitor=previous;}
 });
+
+test('stream backup authenticates ordered frames, stages attachments separately, rejects tampering and truncated terminator',async()=>{
+ const {writeStreamBackup,readStreamBackup,previewStreamBackup,isStreamBackup}=await import('./streamBackup');
+ const {encodeBytes,digestBytes}=await import('./attachments');
+ const {emptyLedger}=await import('./ledgerDomain');
+ const raw=new Uint8Array([37,80,68,70,45,0,255]),id=await digestBytes(raw),data=encodeBytes(raw),date='2026-11-27T00:00:00Z';
+ const ledger=emptyLedger();ledger.expenses=[{...expense,id:'one',createdAt:date,approvedAt:date,attachmentId:id,attachmentMime:'application/pdf'}];
+ const chunks:Uint8Array<ArrayBuffer>[]=[];const pass='test long password 123';
+ const size=await writeStreamBackup({ledger,draft:null},pass,{async get(){return data;}},async b=>{chunks.push(b);});
+ const file=new Blob(chunks);assert.equal(file.size,size);assert.equal(await isStreamBackup(file),true);
+ const preview=await previewStreamBackup(file,pass);assert.equal(preview.attachmentCount,1);assert.equal(preview.manifest.ledger.aiConfig,undefined);
+ const writes=new Map<string,string>();const store={async put(k:string,v:string){writes.set(k,v);}};
+ const restored=await readStreamBackup(file,pass,store);assert.equal(restored.ledger.expenses[0].id,'one');assert.equal(writes.get(id),data);
+ await assert.rejects(()=>previewStreamBackup(file,'wrong password'));
+ await assert.rejects(()=>readStreamBackup(file.slice(0,file.size-1),pass,store));
+ await assert.rejects(()=>readStreamBackup(new Blob([file,new Uint8Array([1])]),pass,store));
+ const corrupt=new Uint8Array(await file.arrayBuffer());corrupt[corrupt.length-1]^=1;await assert.rejects(()=>readStreamBackup(new Blob([corrupt]),pass,store));
+ const db=new DatabaseSync(':memory:');try{
+ const repo=new LocalLedgerRepository(new SqliteSnapshotStore(driver(db)),{...store,async get(k){const d=writes.get(k);if(!d)throw Error('missing');return d;}});
+ await repo.initialize();await repo.add([expense]);const before=await repo.load();
+ await assert.rejects(()=>repo.restoreStreamBackup(file.slice(0,file.size-1),pass));assert.deepEqual(await repo.load(),before);
+ await repo.restoreStreamBackup(file,pass);assert.equal((await repo.load()).expenses[0].id,'one');
+ }finally{db.close();}
+});

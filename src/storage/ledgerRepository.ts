@@ -19,6 +19,8 @@ export interface LedgerRepository {
   saveDraft?(draft:DraftSession|null):Promise<void>;
   attachmentAudit?():Promise<import('./attachments').AttachmentAudit>;
   cleanupAttachments?():Promise<import('./attachments').AttachmentCleanupResult>;
+  exportStreamBackup?(password:string,sink:import('./streamBackup').ByteSink,progress?:import('./streamBackup').Progress,signal?:AbortSignal):Promise<number>;
+  restoreStreamBackup?(file:Blob,password:string,progress?:import('./streamBackup').Progress,signal?:AbortSignal):Promise<void>;
   exportBackup?():Promise<import('./portableBackup').BackupSnapshot>;
   restoreBackup?(snapshot:import('./portableBackup').BackupSnapshot):Promise<void>;
   recoveryInfo?():Promise<{createdAt:string;count:number}|null>;

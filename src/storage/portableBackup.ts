@@ -13,15 +13,19 @@ async function key(password:string,salt:Uint8Array<ArrayBuffer>){
  const material=await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveKey']);
  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:ITERATIONS,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
 }
-export function cleanBackup(snapshot:BackupSnapshot):BackupSnapshot{
+export function cleanBackupManifest(snapshot:Pick<BackupSnapshot,'ledger'|'draft'>):Pick<BackupSnapshot,'ledger'|'draft'>{
  const {aiConfig:_config,...ledger}=snapshot.ledger;
  // No provider secrets, URLs or prior approval tokens in portable backups.
  const validated=decodeStoredState(JSON.stringify({ledger,draft:snapshot.draft}));
  const {aiConfig:_default,...clean}=validated.ledger;
- const ids=snapshotAttachmentIds(clean,validated.draft), blobs=snapshot.attachments??{};
+ return {ledger:clean,draft:validated.draft};
+}
+export function cleanBackup(snapshot:BackupSnapshot):BackupSnapshot{
+ const clean=cleanBackupManifest(snapshot);
+ const ids=snapshotAttachmentIds(clean.ledger,clean.draft), blobs=snapshot.attachments??{};
  if(!blobs||typeof blobs!=='object'||Array.isArray(blobs)||Object.keys(blobs).length!==ids.length)throw new Error('مجموعه پیوست‌های فایل پشتیبان کامل نیست.');
  for(const id of ids){if(!Object.hasOwn(blobs,id))throw new Error('پیوست در فایل پشتیبان موجود نیست.');decodeBytes(blobs[id]);}
- return {ledger:clean,draft:validated.draft,...(ids.length?{attachments:blobs}:{})};
+ return {...clean,...(ids.length?{attachments:blobs}:{})};
 }
 export async function encryptBackup(snapshot:BackupSnapshot,password:string):Promise<string>{
  if(password.length<12)throw new Error('گذرواژه پشتیبان باید حداقل ۱۲ نویسه باشد.');

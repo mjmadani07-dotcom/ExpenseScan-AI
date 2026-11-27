@@ -14,6 +14,7 @@ on:
       - 'src/components/CaptureWorkspace.tsx'
       - 'src/components/ExpenseLedger.tsx'
       - 'src/storage/portableBackup.ts'
+      - 'src/storage/streamBackup.ts'
       - 'src/storage/localLedgerRepository.ts'
       - 'src/storage/ledgerRows.ts'
       - 'src/components/DraftReviewPanel.tsx'

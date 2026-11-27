@@ -385,6 +385,70 @@ public class LedgerStoragePlugin extends Plugin {
         catch(Exception ex){call.reject("Attachment unavailable or damaged.");}
     }
 
+    private static final long STREAM_BACKUP_LIMIT=512L*1024*1024;
+    private String streamToken=null;
+    private File streamFile=null;
+    private boolean streamPicking=false;
+    private void discardStage(){
+        if(streamFile!=null)streamFile.delete();
+        streamToken=null;streamFile=null;streamPicking=false;
+    }
+    private boolean matchesStage(PluginCall call){return streamToken!=null&&streamToken.equals(call.getString("token"))&&streamFile!=null;}
+    @PluginMethod public synchronized void beginStreamBackup(PluginCall call){
+        if(!requireSession(call))return;
+        if(streamPicking){call.reject("Backup destination picker already open");return;}
+        try{
+            discardStage();
+            File dir=new File(getContext().getCacheDir(),"stream_backups");
+            if(!dir.isDirectory()&&!dir.mkdirs())throw new IllegalStateException("Cannot create backup staging");
+            File[] stale=dir.listFiles();if(stale==null)throw new IllegalStateException("Cannot list backup staging");
+            for(File file:stale)if(file.isFile()&&file.getName().matches("[a-f0-9-]{36}\\.part")&&!file.delete())throw new IllegalStateException("Cannot remove stale staging");
+            streamToken=java.util.UUID.randomUUID().toString();streamFile=new File(dir,streamToken+".part");
+            if(!streamFile.createNewFile())throw new IllegalStateException("Cannot create staging file");
+            JSObject result=new JSObject();result.put("token",streamToken);call.resolve(result);
+        }catch(Exception ex){discardStage();call.reject("Backup staging unavailable");}
+    }
+    @PluginMethod public synchronized void appendStreamBackup(PluginCall call){
+        if(!requireSession(call))return;
+        if(!matchesStage(call)||streamPicking){call.reject("Backup staging expired");return;}
+        try{
+            String data=call.getString("data");
+            if(data==null||data.length()>1398104)throw new IllegalArgumentException("Invalid backup chunk");
+            byte[] bytes=Base64.decode(data,Base64.NO_WRAP);
+            if(bytes.length==0||bytes.length>1048576||streamFile.length()+bytes.length>STREAM_BACKUP_LIMIT)throw new IllegalArgumentException("Backup exceeds capacity");
+            try(FileOutputStream out=new FileOutputStream(streamFile,true)){out.write(bytes);}
+            call.resolve();
+        }catch(Exception ex){discardStage();call.reject("Backup staging failed; no destination file was created");}
+    }
+    @PluginMethod public synchronized void discardStreamBackup(PluginCall call){
+        // Safe even after session timeout: only delete the matching private temporary file.
+        if(matchesStage(call)&&!streamPicking)discardStage();call.resolve();
+    }
+    @PluginMethod public synchronized void finishStreamBackup(PluginCall call){
+        if(!requireSession(call))return;
+        String name=call.getString("name");
+        if(!matchesStage(call)||streamPicking||streamFile.length()<52||name==null||!name.matches("[A-Za-z0-9._-]{1,100}")||!name.endsWith(".esbackup2")){call.reject("Invalid staged backup");return;}
+        try{
+            try(FileOutputStream out=new FileOutputStream(streamFile,true)){out.getFD().sync();}
+            Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/octet-stream");intent.putExtra(Intent.EXTRA_TITLE,name);
+            streamPicking=true;startActivityForResult(call,intent,"streamBackupResult");
+        }catch(Exception ex){discardStage();call.reject("Cannot select backup destination");}
+    }
+    @ActivityCallback private synchronized void streamBackupResult(PluginCall call,ActivityResult result){
+        if(call==null){discardStage();return;}
+        Uri uri=result.getData()==null?null:result.getData().getData();
+        if(result.getResultCode()!=Activity.RESULT_OK||uri==null||!matchesStage(call)||!sessionValid()){
+            discardStage();call.reject("Backup export cancelled or session expired; remove any empty destination file.");return;
+        }
+        try(FileInputStream in=new FileInputStream(streamFile);OutputStream out=getContext().getContentResolver().openOutputStream(uri,"w")){
+            if(out==null)throw new IllegalStateException("Cannot open destination");
+            byte[] buffer=new byte[65536];int n;long copied=0,expected=streamFile.length();
+            while((n=in.read(buffer))!=-1){if(!sessionValid())throw new IllegalStateException("Session expired");out.write(buffer,0,n);copied+=n;}
+            out.flush();if(copied!=expected)throw new IllegalStateException("Incomplete copy");
+        }catch(Exception ex){discardStage();call.reject("Backup copy failed; destination may contain an incomplete encrypted file. Delete it and retry.");return;}
+        discardStage();call.resolve();
+    }
+
     @PluginMethod public void saveBackupFile(PluginCall call) {saveExport(call,true);}
     @PluginMethod public void saveExportFile(PluginCall call) {saveExport(call,false);}
     private void saveExport(PluginCall call,boolean backup) {
