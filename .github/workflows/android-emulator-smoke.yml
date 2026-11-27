@@ -103,7 +103,13 @@ jobs:
           adb shell svc wifi disable
           adb shell svc data disable
           chmod +x gradlew
-          ./gradlew --no-daemon :app:connectedDebugAndroidTest
+          # Install explicitly rather than let Gradle/UTP remove app or test APK
+          # after instrumentation. The exact fixture must survive until upgrade.
+          adb install -r app/build/outputs/apk/debug/app-debug.apk
+          adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          adb shell am instrument -w -e class 'ir.expensescan.hesabyar.LedgerDeviceTest,ir.expensescan.hesabyar.LedgerWorkflowTest#offlineInvoiceLifecycleAndPortableBackup' ir.expensescan.hesabyar.test/androidx.test.runner.AndroidJUnitRunner | tee /tmp/expensescan-e2e-result.txt
+          grep -Eq '^OK \(4 tests\)' /tmp/expensescan-e2e-result.txt
+          ! grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' /tmp/expensescan-e2e-result.txt
           # Keep the same debug signer on this runner; increment the APK version
           # and exercise Android's actual package update without removing app data.
           signer="$ANDROID_HOME/build-tools/35.0.0/apksigner"

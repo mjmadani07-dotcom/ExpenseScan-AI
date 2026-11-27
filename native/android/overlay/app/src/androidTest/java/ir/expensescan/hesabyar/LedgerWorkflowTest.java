@@ -84,7 +84,47 @@ public class LedgerWorkflowTest {
         return (activity.contains("com.android.settings/")||activity.contains("com.google.android.settings/")||activity.contains("com.android.systemui/"))
             &&(activity.contains("ConfirmLock")||activity.contains("ConfirmDeviceCredential")||activity.contains("Credential")||activity.contains("Biometric"));
     }
+    private android.app.KeyguardManager keyguard(){
+        android.content.Context ctx=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        return (android.app.KeyguardManager)ctx.getSystemService(android.content.Context.KEYGUARD_SERVICE);
+    }
+    private void unlockDeviceScreen()throws Exception{
+        // Only the disposable emulator has the known synthetic credential.
+        assertTrue("Synthetic workflow must never run on a physical phone","1".equals(shell("getprop ro.kernel.qemu"))||"1".equals(shell("getprop ro.boot.qemu")));
+        device.wakeUp();
+        if(!keyguard().isKeyguardLocked())return;
+        try{
+            device.pressKeyCode(KeyEvent.KEYCODE_MENU);
+            Thread.sleep(400);
+            if(keyguard().isKeyguardLocked()){
+                UiObject2 digit=device.findObject(By.res(Pattern.compile("com\\.android\\.systemui:id/(key2|digit_2)")));
+                if(digit==null){
+                    int x=device.getDisplayWidth()/2,h=device.getDisplayHeight();
+                    device.swipe(x,h*4/5,x,h/5,20);
+                }
+                digit=device.wait(Until.findObject(By.res(Pattern.compile("com\\.android\\.systemui:id/(key2|digit_2)"))),6000);
+                if(keyguard().isKeyguardLocked()){
+                    assertNotNull("Device lockscreen PIN keypad not visible",digit);
+                    for(char d:PIN.toCharArray()){
+                        if(!keyguard().isKeyguardLocked())break;
+                        UiObject2 key=device.findObject(By.res(Pattern.compile("com\\.android\\.systemui:id/(key"+d+"|digit_"+d+")")));
+                        assertNotNull("Device PIN digit missing",key);key.click();
+                        Thread.sleep(100);
+                    }
+                    if(keyguard().isKeyguardLocked()){
+                        UiObject2 enter=device.findObject(By.res(Pattern.compile("com\\.android\\.systemui:id/(key_enter|keyEnter)")));
+                        if(enter!=null&&enter.isEnabled())enter.click();else device.pressEnter();
+                    }
+                }
+            }
+            long until=android.os.SystemClock.elapsedRealtime()+15000;
+            while(keyguard().isKeyguardLocked()&&android.os.SystemClock.elapsedRealtime()<until)Thread.sleep(250);
+            assertFalse("Device remained locked before app launch",keyguard().isKeyguardLocked());
+            assertTrue("Device must retain its secure credential",keyguard().isDeviceSecure());
+        }catch(AssertionError|Exception ex){diagnostics("Device lockscreen unlock failed");throw ex;}
+    }
     private void unlock(ActivityScenario<MainActivity> app)throws Exception{
+        unlockDeviceScreen();
         text(app,"حساب‌یار قفل است");
         JSONObject status=bridge(app,"Capacitor.Plugins.LedgerStorage.sessionStatus()");
         assertTrue("Emulator must have a secure device credential",status.getBoolean("ok")&&status.getJSONObject("value").getBoolean("deviceSecure"));
@@ -166,6 +206,7 @@ public class LedgerWorkflowTest {
         assertTrue("Synthetic workflow must never run on a physical phone","1".equals(shell("getprop ro.kernel.qemu"))||"1".equals(shell("getprop ro.boot.qemu")));
         assertEquals("1",shell("settings get global airplane_mode_on"));
         String id,attachment,encoded;
+        unlockDeviceScreen();
         try(ActivityScenario<MainActivity> app=ActivityScenario.launch(MainActivity.class)){
             unlock(app);
             nav(app,"هزینه‌ها");
@@ -237,6 +278,7 @@ public class LedgerWorkflowTest {
             click(app,"قفل فوری برنامه");text(app,"حساب‌یار قفل است");
             assertFalse(bridge(app,"Capacitor.Plugins.LedgerStorage.read({scope:'active'})").getBoolean("ok"));
         }
+        unlockDeviceScreen();
         try(ActivityScenario<MainActivity> reopened=ActivityScenario.launch(MainActivity.class)){
             unlock(reopened);nav(reopened,"هزینه‌ها");text(reopened,EDITED);
             JSONObject persisted=record(reopened,EDITED,23456);assertEquals(id,persisted.getString("id"));assertEquals(attachment,persisted.getString("attachmentId"));
@@ -255,6 +297,7 @@ public class LedgerWorkflowTest {
         android.content.SharedPreferences fixture=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getContext().getSharedPreferences("upgrade_fixture",android.content.Context.MODE_PRIVATE);
         String id=fixture.getString("id",null),attachment=fixture.getString("attachment",null);
         assertNotNull("Missing pre-upgrade fixture",id);assertNotNull(attachment);
+        unlockDeviceScreen();
         try(ActivityScenario<MainActivity> app=ActivityScenario.launch(MainActivity.class)){
             unlock(app);nav(app,"هزینه‌ها");text(app,EDITED);
             JSONObject persisted=record(app,EDITED,23456);
