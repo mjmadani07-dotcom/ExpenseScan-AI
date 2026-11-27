@@ -93,15 +93,17 @@ test('Android bridge uses exact revision string, validates snapshots and fails c
   const global=globalThis as any;
   const previous=global.Capacitor;
   try {
-    let payload='',rev=0;
+    let payload='',rev=0,schema=2;const rows=new Map<string,any>();const patches:any[]=[];
     global.Capacitor={getPlatform:()=> 'android',Plugins:{LedgerStorage:{
       async initialize(v:any){if(!payload)payload=v.initialPayload;},
-      async read(){return {revision:rev,payload};},
-      async compareAndSwap(v:any){assert.equal(typeof v.revision,'string');if(v.revision!==String(rev))return {committed:false};payload=v.payload;rev++;return {committed:true};}
+      async read(){return schema===2?{revision:rev,schema,payload}:{revision:rev,schema,rows:JSON.stringify([...rows.values()])};},
+      async commitRows(v:any){assert.equal(typeof v.revision,'string');if(v.revision!==String(rev))return {committed:false};const patch=JSON.parse(v.patch);patches.push(patch);for(const x of patch.deletes)rows.delete(JSON.stringify([x.table,x.id]));for(const x of patch.upserts)rows.set(JSON.stringify([x.table,x.id]),x);schema=3;rev++;return {committed:true};}
     }}};
     const store=new AndroidSnapshotStore();await store.initialize();
     const repo=new LocalLedgerRepository(store);
-    await repo.add([expense]);assert.equal((await repo.load()).expenses[0].amount,12345);
+    const [created]=await repo.add([expense]);assert.equal((await repo.load()).expenses[0].amount,12345);
+    assert.equal(schema,3);await repo.update(created.id,{amount:12346});assert.deepEqual(patches.at(-1).upserts.map((x:any)=>x.table),['expenses']);
+    assert.equal((await repo.load()).expenses[0].amount,12346);
     global.Capacitor={getPlatform:()=> 'android'};
     await assert.rejects(()=>store.read(),/اندروید/);
   } finally {if(previous===undefined)delete global.Capacitor;else global.Capacitor=previous;}
@@ -180,4 +182,31 @@ test('separate attachment store preserves originals and full encrypted backup ro
  assert.equal((await second.load()).expenses.length,1);
  await assert.rejects(()=>repo.add([{...expense,attachmentId:'a'.repeat(64),attachmentMime:'application/pdf'}]));
  }finally{db1.close();db2.close();}
+});
+
+test('partitioned ledger preserves order, line items, installments, settings and recovery with exact roundtrip',async()=>{
+ const {partitionLedger,assembleLedger,canonicalJson,diffLedgerRows}=await import('./ledgerRows');
+ const {emptyLedger}=await import('./ledgerDomain');
+ const {decodeStoredState}=await import('./sqliteStore');
+ const ledger=emptyLedger(),date='2026-11-27T00:00:00Z';
+ const record={...expense,id:'legacy-document',createdAt:date,approvedAt:date,lineItems:[{description:'item',quantity:2,unitPrice:100,totalPrice:200}],paymentTranches:[{id:'p1',title:'part',amount:100,method:'cash' as const,status:'paid' as const}]};
+ ledger.expenses=[record,{...record,id:'second'}];
+ const before=decodeStoredState(JSON.stringify({ledger,draft:null,recoveries:[{id:'r1',createdAt:date,ledger,draft:null}]}));
+ const rows=partitionLedger(before);assert.equal(canonicalJson(assembleLedger(rows)),canonicalJson(before));
+ const next=structuredClone(before);next.ledger.expenses[0].lineItems[0].description='changed';
+ const patch=diffLedgerRows(rows,partitionLedger(next));assert.deepEqual(patch.upserts.map(x=>x.table),['line_items']);assert.equal(patch.deletes.length,0);
+ assert.throws(()=>assembleLedger(rows.filter(r=>r.table!=='line_items')),/نامعتبر/);
+ assert.throws(()=>assembleLedger([...rows,rows[0]]),/نامعتبر/);
+ assert.throws(()=>assembleLedger(rows.map(r=>r.table==='line_items'?{...r,parent:'incorrect'}:r)),/نامعتبر/);
+});
+test('row changes preserve independent recovery snapshots and remove dependent children only',async()=>{
+ const {partitionLedger,diffLedgerRows,assembleLedger}=await import('./ledgerRows');
+ const {emptyLedger}=await import('./ledgerDomain');
+ const date='2026-11-27T00:00:00Z',ledger=emptyLedger();
+ ledger.expenses=[{...expense,id:'one',createdAt:date,approvedAt:date,lineItems:[{description:'item',quantity:1,unitPrice:100,totalPrice:100}]}];
+ const before={ledger,draft:null,recoveries:[{id:'old',createdAt:date,ledger:structuredClone(ledger),draft:null}]};
+ const after=structuredClone(before);after.ledger.expenses=[];
+ const old=partitionLedger(before),next=partitionLedger(after),patch=diffLedgerRows(old,next);
+ assert.deepEqual(patch.deletes.map(x=>x.table),['expenses','line_items']);assert.deepEqual(patch.upserts.map(x=>x.table),['meta']);
+ assert.equal(assembleLedger(next).recoveries![0].ledger.expenses.length,1);
 });

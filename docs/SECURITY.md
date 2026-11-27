@@ -29,3 +29,5 @@ Device credential gate is implemented in Java via Android KeyguardManager, not a
 Internal recovery archive: three rotating checkpoints, each stored inside the encrypted ledger payload, manual creation and selective restore/delete. Logical deletion does not guarantee physical erasure. Capacity limit is shared with the ledger; exceeding it fails closed. No scheduled external backup or off-device synchronization is implemented.
 
 Originals: distinct Keystore AES-GCM alias; SHA-256 verified on write/read; immutable atomic files. No file paths from user input. Explicit plaintext export warning. Backup contents include referenced originals and validate integrity before restore; failed writes can leave encrypted unreferenced files but cannot point committed ledger to unwritten bytes. No secure erase or orphan cleanup yet.
+
+Schema v3 row payloads retain AES-GCM encryption and authenticate row identity/table/parent inside the sealed envelope. SQLite identifiers, relationships and row counts are not encrypted; no plaintext amount/vendor columns. Migration is transactional and logical deletion does not ensure physical erasure. Real-device validation remains required.

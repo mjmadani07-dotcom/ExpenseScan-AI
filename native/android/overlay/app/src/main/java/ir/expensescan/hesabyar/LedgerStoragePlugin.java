@@ -32,6 +32,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 @CapacitorPlugin(name = "LedgerStorage")
 public class LedgerStoragePlugin extends Plugin {
@@ -86,8 +87,13 @@ public class LedgerStoragePlugin extends Plugin {
     }
 
     private SQLiteDatabase open() {
-        return getContext().openOrCreateDatabase(DB_NAME, android.content.Context.MODE_PRIVATE, null);
+        SQLiteDatabase db=getContext().openOrCreateDatabase(DB_NAME, android.content.Context.MODE_PRIVATE, null);
+        db.setForeignKeyConstraintsEnabled(true);return db;
     }
+    private LedgerTables.Codec rowCodec(){return new LedgerTables.Codec(){
+        public String seal(String plain)throws Exception{return encrypt(LEDGER_KEY,plain,false);}
+        public String open(String cipher)throws Exception{return decrypt(LEDGER_KEY,cipher);}
+    };}
 
     private SecretKey key(String alias, boolean create) throws Exception {
         KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
@@ -152,8 +158,9 @@ public class LedgerStoragePlugin extends Plugin {
                         encrypted.put("payload",encrypt(LEDGER_KEY,old,true));
                         if(db.update("ledger_state",encrypted,"id=1",null)!=1)throw new IllegalStateException("Migration failed");
                         db.setVersion(SCHEMA);
-                    } else if (version != SCHEMA) throw new IllegalStateException("Unsupported database schema");
-                    decrypt(LEDGER_KEY,readPayload(db));
+                    } else if (version != SCHEMA && version!=LedgerTables.VERSION) throw new IllegalStateException("Unsupported database schema");
+                    if(db.getVersion()==SCHEMA)decrypt(LEDGER_KEY,readPayload(db));
+                    else LedgerTables.revision(db,"ledger_revision");
                     db.setTransactionSuccessful();
                 } finally { db.endTransaction(); }
             }
@@ -164,38 +171,61 @@ public class LedgerStoragePlugin extends Plugin {
     @PluginMethod public synchronized void read(PluginCall call) {
         if(!requireSession(call))return;
         try (SQLiteDatabase db = open()) {
-            if (db.getVersion() != SCHEMA) throw new IllegalStateException("Unsupported database schema");
-            JSObject result = new JSObject();
+            int schema=db.getVersion();
+            if(schema!=SCHEMA&&schema!=LedgerTables.VERSION)throw new IllegalStateException("Unsupported database schema");
+            JSObject result=new JSObject();
             db.beginTransaction();
             try {
-                try (SQLiteStatement stmt = db.compileStatement("SELECT revision FROM ledger_state WHERE id=1")) {
-                    result.put("revision",stmt.simpleQueryForLong());
+                result.put("schema",schema);
+                if(schema==SCHEMA){
+                    result.put("revision",LedgerTables.revision(db,"ledger_state"));
+                    result.put("payload",decrypt(LEDGER_KEY,readPayload(db)));
+                }else{
+                    result.put("revision",LedgerTables.revision(db,"ledger_revision"));
+                    result.put("rows",LedgerTables.read(db,rowCodec()).toString());
                 }
-                result.put("payload",decrypt(LEDGER_KEY,readPayload(db)));
                 db.setTransactionSuccessful();
-            } finally { db.endTransaction(); }
+            }finally{db.endTransaction();}
             call.resolve(result);
-        } catch (Exception ex) { call.reject("SQLite read failed; existing data was preserved."); }
+        }catch(Exception ex){call.reject("SQLite read failed; existing data was preserved.");}
     }
 
-    @PluginMethod public synchronized void compareAndSwap(PluginCall call) {
+    @PluginMethod public synchronized void commitRows(PluginCall call){
         if(!requireSession(call))return;
-        try {
-            // Android JSON often decodes small numbers as Integer, not Long.
-            String revisionText = call.getString("revision");
-            if (revisionText == null || !revisionText.matches("[0-9]{1,16}")) throw new IllegalArgumentException("Invalid revision");
-            long revision = Long.parseLong(revisionText);
-            if (revision > 9007199254740990L) throw new IllegalArgumentException("Revision exceeds JS safe range");
-            String payload = checkedPayload(call,"payload");
-            int changes;
-            try (SQLiteDatabase db = open()) {
-                if (db.getVersion() != SCHEMA) throw new IllegalStateException("Unsupported database schema");
-                ContentValues values = new ContentValues();
-                values.put("payload",encrypt(LEDGER_KEY,payload,false)); values.put("revision",revision+1);
-                changes = db.update("ledger_state",values,"id=1 AND revision=?",new String[]{Long.toString(revision)});
+        try{
+            String revisionText=call.getString("revision"),raw=call.getString("patch");
+            if(revisionText==null||!revisionText.matches("[0-9]{1,16}")||raw==null||raw.length()>64L*1024*1024)throw new IllegalArgumentException("Invalid row change");
+            long revision=Long.parseLong(revisionText);
+            if(revision>9007199254740990L)throw new IllegalArgumentException("Revision exceeds JS safe range");
+            JSONObject patch=new JSONObject(raw);
+            JSONArray upserts=patch.getJSONArray("upserts"),deletes=patch.getJSONArray("deletes");
+            boolean migration=Boolean.TRUE.equals(call.getBoolean("migration",false)),committed=false;
+            try(SQLiteDatabase db=open()){
+                db.beginTransaction();
+                try{
+                    int schema=db.getVersion();
+                    if(schema!=SCHEMA&&schema!=LedgerTables.VERSION)throw new IllegalStateException("Unsupported schema");
+                    if(migration!=(schema==SCHEMA))throw new IllegalStateException("Migration state mismatch");
+                    long actual=LedgerTables.revision(db,migration?"ledger_state":"ledger_revision");
+                    if(actual==revision){
+                        if(migration){
+                            if(deletes.length()!=0)throw new IllegalArgumentException("Invalid migration");
+                            LedgerTables.create(db,revision);
+                        }
+                        LedgerTables.apply(db,deletes,upserts,rowCodec());
+                        ContentValues v=new ContentValues();v.put("revision",revision+1);
+                        if(db.update("ledger_revision",v,"id=1 AND revision=?",new String[]{revisionText})!=1)throw new IllegalStateException("Revision changed");
+                        if(migration){
+                            // Round-trip is checked by TypeScript before sending full migration rows.
+                            // All DDL/data writes and the legacy table removal share one transaction.
+                            db.execSQL("DROP TABLE ledger_state");db.setVersion(LedgerTables.VERSION);
+                        }
+                        db.setTransactionSuccessful();committed=true;
+                    }
+                }finally{db.endTransaction();}
             }
-            JSObject result = new JSObject(); result.put("committed",changes==1); call.resolve(result);
-        } catch (Exception ex) { call.reject("SQLite write failed; no success was reported."); }
+            JSObject result=new JSObject();result.put("committed",committed);call.resolve(result);
+        }catch(Exception ex){call.reject("SQLite transaction failed; previous committed data was preserved.");}
     }
 
     @PluginMethod public synchronized void loadKeys(PluginCall call) {
