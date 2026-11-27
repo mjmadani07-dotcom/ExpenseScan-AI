@@ -109,21 +109,7 @@ jobs:
           out="apk-output/ExpenseScan-${GITHUB_REF_NAME}.apk"
           "$tools/apksigner" sign --ks "$ks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS --out "$out" /tmp/aligned.apk
           "$tools/apksigner" verify --verbose --print-certs "$out" > /tmp/cert.txt
-          grep -Eq '^Verified using v[23] scheme.*: true
-          actual="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/cert.txt | tr '[:upper:]' '[:lower:]')"
-          expected="$(printf '%s' "$EXPECTED_CERT" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
-          test "$actual" = "$expected"
-          "$tools/aapt" dump badging "$out" > /tmp/badging.txt
-          grep -q "package: name='ir.expensescan.hesabyar' versionCode='$ANDROID_VERSION_CODE' versionName='0.1.0-beta.$ANDROID_VERSION_CODE'" /tmp/badging.txt
-          if grep -q application-debuggable /tmp/badging.txt; then exit 1; fi
-          sha256sum "$out" > apk-output/SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ExpenseScan-${{ github.ref_name }}
-          path: apk-output/
-          retention-days: 3
-          if-no-files-found: error
- /tmp/cert.txt
+          grep -Eq '^Verified using v[23] scheme.*: true$' /tmp/cert.txt
           actual="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/cert.txt | tr '[:upper:]' '[:lower:]')"
           expected="$(printf '%s' "$EXPECTED_CERT" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
           test "$actual" = "$expected"

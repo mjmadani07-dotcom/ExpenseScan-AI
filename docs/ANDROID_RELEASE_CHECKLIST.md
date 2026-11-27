@@ -26,3 +26,5 @@ Use a separate test phone and synthetic expenses. Record phone model, Android ve
 - [ ] Owner accepts risks and stores release APK/checksum and signing key backups securely.
 
 Do not deploy a failed or untested candidate to operational accounts. No production data or signing secrets in logs or Git.
+
+Candidate CI correction: explicit AVD home and startup preflight; corrected signature workflow formatting. All checkboxes remain unverified until the exact commit passes.

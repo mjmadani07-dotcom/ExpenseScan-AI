@@ -53,7 +53,14 @@ jobs:
           avdmanager_path="$(dirname "$sdkmanager_path")/avdmanager"
           test -x "$avdmanager_path"
           "$sdkmanager_path" --sdk_root="$sdk_root" "platform-tools" "emulator" "platforms;android-35" "build-tools;35.0.0" "system-images;android-35;google_apis;x86_64"
-          echo no | "$avdmanager_path" create avd --force -n ExpenseScanCI -k "system-images;android-35;google_apis;x86_64"
+          export ANDROID_USER_HOME="$RUNNER_TEMP/expensescan-android-user"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo "ANDROID_USER_HOME=$ANDROID_USER_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
+          printf 'no\n' | "$avdmanager_path" create avd --force -n ExpenseScanCI -k "system-images;android-35;google_apis;x86_64" -p "$ANDROID_AVD_HOME/ExpenseScanCI.avd"
+          test -f "$ANDROID_AVD_HOME/ExpenseScanCI.ini"
+          "$sdk_root/emulator/emulator" -list-avds | grep -Fxq ExpenseScanCI
       - name: Boot emulator and run installed-app instrumentation
         working-directory: .android-build/android
         shell: bash
@@ -61,7 +68,15 @@ jobs:
           set -euo pipefail
           "$ANDROID_HOME/emulator/emulator" -avd ExpenseScanCI -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -memory 2048 -cores 2 > /tmp/expensescan-emulator.log 2>&1 &
           trap 'adb emu kill >/dev/null 2>&1 || true; tail -n 40 /tmp/expensescan-emulator.log || true' EXIT
-          timeout 240 adb wait-for-device
+          emulator_pid=$!
+          adb start-server
+          # Fail immediately if emulator exits rather than waiting on an absent device.
+          for i in $(seq 1 180); do
+            kill -0 "$emulator_pid" 2>/dev/null || { echo "Emulator exited before adb connected"; exit 1; }
+            if adb devices | grep -Eq '^emulator-[0-9]+[[:space:]]+device$'; then break; fi
+            sleep 2
+          done
+          adb devices | grep -Eq '^emulator-[0-9]+[[:space:]]+device$'
           for i in $(seq 1 120); do
             if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; then break; fi
             sleep 2
