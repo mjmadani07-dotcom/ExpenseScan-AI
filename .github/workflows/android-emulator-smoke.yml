@@ -84,6 +84,8 @@ jobs:
           done
           test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
           adb shell input keyevent 82
+          # Disposable emulator credential only; no production secret or bypass.
+          adb shell locksettings set-pin 2468
           adb shell settings put global airplane_mode_on 1
           adb shell cmd connectivity airplane-mode enable
           adb shell svc wifi disable

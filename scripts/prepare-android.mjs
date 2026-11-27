@@ -49,6 +49,7 @@ if(!g.includes('androidx.biometric:biometric:1.1.0')){if(!/dependencies\s*\{/.te
 if(!g.includes('org.json:json:20240303'))g=g.replace(/dependencies\s*\{/,'dependencies {\n    testImplementation "org.json:json:20240303"');
 if(!g.includes('androidx.test:core:'))g=g.replace(/dependencies\s*\{/,'dependencies {\n    androidTestImplementation "androidx.test:core:1.6.1"');
 if(!g.includes('androidx.test.ext:junit:'))g=g.replace(/dependencies\s*\{/,'dependencies {\n    androidTestImplementation "androidx.test.ext:junit:1.2.1"');
+if(!g.includes('androidx.test.uiautomator:uiautomator:'))g=g.replace(/dependencies\s*\{/,'dependencies {\n    androidTestImplementation "androidx.test.uiautomator:uiautomator:2.3.0"');
 const code=Number(process.env.ANDROID_VERSION_CODE||1);
 if(!Number.isSafeInteger(code)||code<1||code>2100000000)throw new Error('Invalid version code');
 const channel=process.env.ANDROID_RELEASE_CHANNEL||'alpha';

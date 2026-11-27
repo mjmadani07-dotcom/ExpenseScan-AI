@@ -376,6 +376,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
 
   const handleCreateManualDraft = async () => {
     if(isProcessing)return;
+    preparationCancelledRef.current=false;
     setIsProcessing(true);setErrorMessage(null);
     try {
     const source=mode==='file_photo'?stagedFile?.original:originalText.current??undefined;
