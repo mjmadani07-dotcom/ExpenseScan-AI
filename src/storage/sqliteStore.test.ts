@@ -221,3 +221,16 @@ test('attachment inventory protects recovery-only and draft-only references and 
  const audit=auditAttachmentInventory([{id:a,storedBytes:10},{id:b,storedBytes:20},{id:d,storedBytes:40}],{ledger,draft,recoveries:[{id:'r',createdAt:date,ledger:recovery,draft:null}]});
  assert.deepEqual(audit,{referenced:3,missing:1,unreferenced:1,unreferencedBytes:40,storedBytes:70});
 });
+
+test('AI connection probe uses only synthetic data and respects custom endpoint and secure transport',async()=>{
+ const {testAiConnection}=await import('../utils/clientAiExtract');
+ const previous=globalThis.fetch;let count=0;
+ try{
+ globalThis.fetch=async(url,init)=>{count++;assert.equal(String(url),'https://example.invalid/v1/chat/completions');assert.equal(init?.redirect,'error');const headers=init?.headers as Record<string,string>;assert.equal(headers.Authorization,'Bearer dummy-test');const body=String(init?.body);assert.match(body,/SYNTHETIC CONNECTION TEST ONLY/);assert.match(body,/test-model/);return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({expenses:[{title:'Test receipt',vendor:'Test Vendor',amount:10000,currency:'IRR',date:'2026-11-27',paymentMethod:'cash',paymentStatus:'paid'}]})}}]}),{status:200});};
+ const params={provider:'openai' as const,model:'test-model',apiKey:'dummy-test',baseUrl:'https://example.invalid/v1',secureTransport:true};
+ assert.equal((await testAiConnection(params)).count,1);assert.equal(count,1);
+ await assert.rejects(()=>testAiConnection({...params,baseUrl:'http://example.invalid/v1'}),/HTTPS/);assert.equal(count,1);
+ globalThis.fetch=async()=>new Response('secret echoed from remote service',{status:400});
+ await assert.rejects(()=>testAiConnection(params),e=>e instanceof Error&&!e.message.includes('secret echoed')&&e.message.includes('400'));
+ }finally{globalThis.fetch=previous;}
+});

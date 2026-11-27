@@ -26,6 +26,7 @@ export interface ClientExtractParams {
   text?: string;
   fileName?: string;
   signal?: AbortSignal;
+  secureTransport?: boolean;
 }
 
 function formatClientAiError(providerLabel: string, status: number, bodyText: string): string {
@@ -38,7 +39,7 @@ function formatClientAiError(providerLabel: string, status: number, bodyText: st
   if (status === 503) {
     return `سرویس ${providerLabel} موقتاً شلوغ است. چند ثانیه دیگر دوباره تلاش کنید.`;
   }
-  return `خطا در ارتباط مستقیم با ${providerLabel} (کد ${status}): ${bodyText.slice(0, 180)}`;
+  return `خطا در ارتباط مستقیم با ${providerLabel} (کد ${status}). مدل، آدرس و مجوزهای کلید را بررسی کنید.`;
 }
 
 export async function extractExpensesDirectlyFromBrowser(
@@ -57,6 +58,7 @@ export async function extractExpensesDirectlyFromBrowser(
     : `${contextHint}لطفاً تمام اطلاعات مالی، اقلام فاکتور، تاریخ، مبلغ، مالیات، فروشنده و نحوه تسویه (یکجا، یا در صورت وجود پیش‌پرداخت/چک، بخش‌های پرداخت) را از تصویر(های) پیوست‌شده استخراج و در JSON با کلید expenses برگردان.`;
 
   const validatedBaseUrl = validateClientBaseUrl(params.baseUrl);
+  if(params.secureTransport&&validatedBaseUrl&&new URL(validatedBaseUrl).protocol!=='https:')throw new Error('در نسخه اندروید فقط اتصال HTTPS به سرویس AI مجاز است.');
 
   if (params.provider === 'gemini') {
     const modelName = params.model.trim() || 'gemini-4-hydrogen';
@@ -78,6 +80,7 @@ export async function extractExpensesDirectlyFromBrowser(
     const res = await fetch(url, {
       method: 'POST',
       signal: params.signal,
+      redirect: 'error',
       headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': apiKey,
@@ -143,6 +146,7 @@ export async function extractExpensesDirectlyFromBrowser(
   const res = await fetch(endpointUrl, {
     method: 'POST',
     signal: params.signal,
+    redirect: 'error',
     headers,
     body: JSON.stringify({
       model: params.model.trim() || (isOpenRouter ? 'google/gemini-2.5-flash' : 'gpt-4o-mini'),
@@ -172,4 +176,21 @@ export async function extractExpensesDirectlyFromBrowser(
     throw new Error('هیچ هزینه یا فاکتور قابل استخراجی در این سند یافت نشد.');
   }
   return normalizeExtractedExpenseList(parsed.expenses, todayIso, params.categories);
+}
+
+// Uses the same extraction protocol and model as production, without user records.
+export async function testAiConnection(params:Pick<ClientExtractParams,'provider'|'model'|'apiKey'|'baseUrl'|'secureTransport'>):Promise<{count:number}>{
+ if(!params.model.trim())throw new Error('نام مدل را وارد کنید.');
+ const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),20000);
+ try{
+  const results=await extractExpensesDirectlyFromBrowser({...params,signal:controller.signal,text:'SYNTHETIC CONNECTION TEST ONLY. Sample test receipt: vendor Test Vendor, title Test receipt, amount 10000 IRR, payment cash, paid. Return the requested expenses JSON.'});
+  if(!results.length)throw new Error('پاسخ ساختاریافته دریافت نشد.');
+  return {count:results.length};
+ }catch(err){
+  if(controller.signal.aborted)throw new Error('مهلت آزمایش اتصال به پایان رسید.');
+  if(err instanceof TypeError)throw new Error('ارتباط برقرار نشد؛ اینترنت، HTTPS و محدودیت CORS سرویس را بررسی کنید.');
+  // Do not surface remote response text (may contain sensitive request data).
+  if(err instanceof Error&&/^(کلید امنیتی|سهمیه|سرویس |خطا در ارتباط مستقیم|در نسخه اندروید|هیچ هزینه|پاسخ)/.test(err.message))throw err;
+  throw new Error('آزمایش مدل ناموفق بود؛ پاسخ ساختاریافته معتبر دریافت نشد.');
+ }finally{clearTimeout(timer);}
 }

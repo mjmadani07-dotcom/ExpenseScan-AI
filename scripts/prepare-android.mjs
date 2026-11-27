@@ -12,6 +12,25 @@ if(existsSync(join(src,'package-lock.json')))cpSync(join(src,'package-lock.json'
 const run=(cmd,args)=>{const p=spawnSync(cmd,args,{cwd:target,stdio:'inherit',shell:process.platform==='win32'});if(p.status!==0)throw new Error(cmd+' failed');};
 run('npm',[existsSync(join(target,'package-lock.json'))?'ci':'install','--no-audit','--no-fund']);
 rmSync(join(target,'www'),{recursive:true,force:true});cpSync(resolve(root,'dist'),join(target,'www'),{recursive:true});
+// Bundle licensed Persian font locally; no Google Fonts request at runtime.
+const fontRoot=join(target,'node_modules/@fontsource/vazirmatn');
+const fontOut=join(target,'www/fonts/vazirmatn');
+mkdirSync(fontOut,{recursive:true});
+let fontCss='';
+for(const weight of [400,600,700]){
+ const css=readFileSync(join(fontRoot,weight+'.css'),'utf8');
+ const files=[...css.matchAll(/url\(["']?\.\/files\/([^"')]+)["']?\)/g)].map(m=>m[1]);
+ if(!files.length)throw new Error('Missing local font files');
+ for(const file of new Set(files)){mkdirSync(join(fontOut,'files'),{recursive:true});cpSync(join(fontRoot,'files',file),join(fontOut,'files',file));}
+ fontCss+=css+'\n';
+}
+writeFileSync(join(fontOut,'font.css'),fontCss);
+cpSync(join(fontRoot,'LICENSE'),join(fontOut,'LICENSE'));
+const htmlFile=join(target,'www/index.html');
+let html=readFileSync(htmlFile,'utf8').replace(/<link\b[^>]*href=["']https:\/\/fonts\.(?:googleapis|gstatic)\.com[^"']*["'][^>]*>/gi,'').replace(/<link\b[^>]*rel=["']manifest["'][^>]*>/gi,'');
+if(/fonts\.(googleapis|gstatic)\.com/.test(html))throw new Error('Remote font link remains in Android bundle');
+html=html.replace('</head>','<link rel="stylesheet" href="/fonts/vazirmatn/font.css" /></head>');
+writeFileSync(htmlFile,html);
 // Native entry does not register PWA service workers. Remove generated registration/cache files.
 for(const name of ['sw.js','registerSW.js','manifest.webmanifest'])rmSync(join(target,'www',name),{force:true});
 if(!existsSync(join(target,'android')))run('npx',['--no-install','cap','add','android']);

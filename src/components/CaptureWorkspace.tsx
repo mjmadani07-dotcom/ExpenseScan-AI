@@ -29,12 +29,8 @@ import type {
   ExtractedExpenseDraft,
   SourceType,
 } from '../types/expense';
-import {
-  createThumbnailDataUrl,
-  fileToCompressedImage,
-  renderPdfToImages,
-  type RenderedPage,
-} from '../utils/pdfRenderer';
+import type { RenderedPage } from '../utils/pdfRenderer';
+import { MAX_ATTACHMENT_BYTES } from '../storage/attachments';
 import { resolveCategories } from '../utils/finance';
 import { toPersianDigits } from '../utils/jalali';
 import { extractExpensesDirectlyFromBrowser } from '../utils/clientAiExtract';
@@ -109,6 +105,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [stagedFile, setStagedFile] = useState<StagedMediaFile | null>(null);
   const [selectedAi, setSelectedAi] = useState<AiConfig>(aiConfig);
+  const [showAiControls,setShowAiControls]=useState(!localMode);
   const [showQuickKeyBox, setShowQuickKeyBox] = useState(false);
   const [quickKeyInput, setQuickKeyInput] = useState('');
   const [showQuickKeyText, setShowQuickKeyText] = useState(false);
@@ -128,6 +125,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   const textFileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const preparationCancelledRef = useRef(false);
+  useEffect(()=>()=>{preparationCancelledRef.current=true;abortControllerRef.current?.abort();},[]);
 
   const clearInputValues = () => {
     if (cameraInputRef.current) cameraInputRef.current.value = '';
@@ -167,6 +165,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
     totalPages?: number;
     original?: File;
   }) => {
+    if(isProcessing)return;
     setErrorMessage(null);
     setIsProcessing(true);
     const localKey = localApiKeys[selectedAi.provider]?.trim();
@@ -188,6 +187,14 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
       > = [];
 
       const validatedBaseUrl = validateClientBaseUrl(activeCustomBaseUrl);
+      if(localMode&&!localKey)throw new Error('ابتدا کلید سرویس هوش مصنوعی را در تنظیمات وارد کنید، یا ثبت دستی را انتخاب کنید.');
+      if(localMode&&params.original&&params.sType==='pdf'&&!params.pages?.length){
+        const {renderPdfToImages}=await import('../utils/pdfRenderer');
+        const rendered=await renderPdfToImages(params.original,(i,n)=>{if(!controller.signal.aborted)setStatusMessage('آماده‌سازی صفحه '+toPersianDigits(i)+' از '+toPersianDigits(n));});
+        if(controller.signal.aborted)return;
+        params={...params,pages:rendered.pages,totalPages:rendered.totalPages};
+      }
+      if(params.sType==='pdf'&&params.totalPages!==undefined&&params.totalPages>(params.pages?.length??0))throw new Error('این PDF بیش از ظرفیت تحلیل یک‌باره (۱۰ صفحه) است. فایل را تقسیم کنید یا با حفظ اصل سند، دستی ثبت کنید.');
 
       if (localKey) {
         extractedList = await extractExpensesDirectlyFromBrowser({
@@ -203,6 +210,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           text: params.text,
           fileName: params.fileName,
           signal: controller.signal,
+          secureTransport:localMode,
         });
       } else {
         if(localMode) throw new Error('برای تحلیل آنلاین در نسخه مستقل، ابتدا سرویس و روش اتصال را در تنظیمات وارد کنید. ثبت دستی همچنان در دسترس است.');
@@ -235,6 +243,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
 
       if(controller.signal.aborted)return;
       const attachment=localMode&&params.original&&params.sType!=='text'?await nativeAttachFile(params.original,params.sType):{};
+      const {createThumbnailDataUrl}=await import('../utils/pdfRenderer');
       const previewThumb = params.pages?.[0]
         ? await createThumbnailDataUrl(params.pages[0].dataUrl)
         : undefined;
@@ -289,6 +298,8 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
     setIsProcessing(true);
     setStatusMessage('در حال آماده‌سازی پیش‌نمایش تصویر...');
     try {
+      if(localMode&&(file.size<1||file.size>MAX_ATTACHMENT_BYTES))throw new Error('حجم فایل اصلی باید حداکثر ۱۲ مگابایت باشد.');
+      const {fileToCompressedImage}=await import('../utils/pdfRenderer');
       const compressed = await fileToCompressedImage(file);
       if (preparationCancelledRef.current) return;
       setStagedFile({
@@ -315,6 +326,8 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
     setIsProcessing(true);
     setStatusMessage('در حال تبدیل صفحات PDF به تصویر باکیفیت...');
     try {
+      if(localMode){if(file.size<1||file.size>MAX_ATTACHMENT_BYTES)throw new Error('حجم فایل اصلی باید حداکثر ۱۲ مگابایت باشد.');setStagedFile({kind:'pdf',fileName:file.name,fileSizeBytes:file.size,original:file,pages:[],totalPages:0});return;}
+      const {renderPdfToImages}=await import('../utils/pdfRenderer');
       const { pages, totalPages } = await renderPdfToImages(file, (curr, total) => {
         if (!preparationCancelledRef.current) {
           setStatusMessage(
@@ -344,6 +357,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   const handleTextFileSelected = async (file: File) => {
     setErrorMessage(null);
     try {
+      if(localMode&&(file.size<1||file.size>MAX_ATTACHMENT_BYTES))throw new Error('حجم فایل اصلی باید حداکثر ۱۲ مگابایت باشد.');
       const text = await file.text();
       if (!text.trim()) {
         setErrorMessage('فایل متنی انتخاب‌شده خالی است.');
@@ -402,10 +416,10 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 text-balance">
-            ثبت سند، عکس، PDF یا متن هزینه
+            ثبت هزینه
           </h1>
           <p className="mt-1 text-sm text-slate-600">
-            سند را انتخاب کنید؛ پیش از تحلیل یا ثبت نهایی می‌توانید فایل انتخاب‌شده را بررسی یا حذف کنید.
+            ثبت دستی بدون اینترنت یا استخراج هوشمند از سند. هیچ اطلاعاتی تا تأیید نهایی وارد دفتر نمی‌شود.
           </p>
         </div>
 
@@ -413,15 +427,16 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           type="button"
           disabled={isProcessing}
           onClick={handleCreateManualDraft}
-          className="inline-flex items-center justify-center gap-2 min-h-[42px] px-4 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          className="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 py-2 rounded-xl bg-teal-700 text-white text-sm font-semibold hover:bg-teal-800 disabled:opacity-50 transition-colors shrink-0 cursor-pointer"
         >
           <PenLine className="w-4 h-4 text-slate-500" />
-          <span>ورود دستی فرم هزینه</span>
+          <span>{(mode==='file_photo'?stagedFile:originalText.current)?'ثبت دستی با فایل اصلی':'ثبت دستی (آفلاین)'}</span>
         </button>
       </div>
 
-      {/* Active AI Provider / Model Quick Switcher + Quick Device Key & Base URL */}
-      <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3 space-y-3">
+      {/* Advanced settings stay available without occupying the initial capture screen. */}
+      {localMode&&<button type="button" aria-expanded={showAiControls} onClick={()=>setShowAiControls(v=>!v)} className="w-full flex items-center justify-between rounded-xl border bg-white p-3 text-sm"><span>هوش مصنوعی · {selectedAi.provider} · {localApiKeys[selectedAi.provider]?'کلید ثبت شده':'کلید ثبت نشده'}</span><span>{showAiControls?'−':'+'}</span></button>}
+      {showAiControls&&<div className="rounded-2xl bg-white border border-slate-200 px-4 py-3 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
             <Cpu className="w-4 h-4 text-teal-700 shrink-0" />
@@ -581,7 +596,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
                     </span>
                     <button
                       type="button"
-                      onClick={() => onRemoveLocalApiKey(selectedAi.provider)}
+                      onClick={async()=>{try{await onRemoveLocalApiKey(selectedAi.provider);}catch{setErrorMessage('حذف کلید ناموفق بود.');}}}
                       className="text-[11px] font-semibold text-red-600 hover:underline cursor-pointer"
                     >
                       حذف کلید
@@ -629,9 +644,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
                 type="button"
                 disabled={!quickKeyInput.trim()}
                 onClick={async () => {
-                  await onSaveLocalApiKey(selectedAi.provider, quickKeyInput.trim());
-                  setQuickKeyInput('');
-                  setShowQuickKeyBox(false);
+                  try{await onSaveLocalApiKey(selectedAi.provider, quickKeyInput.trim());setQuickKeyInput('');setShowQuickKeyBox(false);}catch{setErrorMessage('ذخیره کلید ناموفق بود.');}
                 }}
                 className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-4 py-1.5 rounded-xl bg-teal-700 text-white text-xs font-semibold hover:bg-teal-800 disabled:opacity-40 cursor-pointer shrink-0"
               >
@@ -641,7 +654,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
             </div>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Segmented Mode Switcher */}
       <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200/80">
@@ -676,7 +689,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
         >
           <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
           <div className="flex-1">
-            <div className="font-semibold">امکان استخراج خودکار وجود نداشت</div>
+            <div className="font-semibold">عملیات انجام نشد</div>
             <p className="mt-1 text-xs text-red-800 leading-relaxed">{errorMessage}</p>
           </div>
           <button
@@ -737,7 +750,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
               </h2>
               <p className="mt-0.5 text-xs text-slate-500 tabular-nums">
                 {stagedFile.kind === 'pdf'
-                  ? `فایل PDF · ${toPersianDigits(stagedFile.pages.length)} صفحه تبدیل‌شده به تصویر`
+                  ? (stagedFile.pages.length?`فایل PDF · ${toPersianDigits(stagedFile.pages.length)} صفحه آماده`:'فایل PDF · اصل سند آماده ثبت دستی یا تحلیل')
                   : 'فایل تصویر'}
                 {' · '}
                 {formatFileSizeFa(stagedFile.fileSizeBytes)}
@@ -772,6 +785,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            {localMode&&<button type="button" onClick={handleCreateManualDraft} className="min-h-[44px] px-4 rounded-xl border border-teal-600 text-teal-800 text-sm font-semibold">ثبت دستی همراه اصل سند</button>}
             <button
               type="button"
               onClick={handleRemoveStagedFile}
@@ -786,14 +800,14 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
                   pages: stagedFile.pages,
                   sType: stagedFile.kind,
                   fileName: stagedFile.fileName,
-                  totalPages: stagedFile.totalPages,
+                  totalPages: stagedFile.totalPages||undefined,
                   original:stagedFile.original,
                 })
               }
               className="inline-flex items-center gap-2 min-h-[44px] px-5 py-2.5 rounded-xl bg-teal-700 text-white text-sm font-semibold hover:bg-teal-800 transition-colors cursor-pointer"
             >
               <Sparkles className="w-4 h-4" />
-              <span>تحلیل و استخراج ساختاریافته</span>
+              <span>استخراج هوشمند (آنلاین)</span>
             </button>
           </div>
         </div>
@@ -847,12 +861,12 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
       />
 
       {mode === 'file_photo' && !isProcessing && !stagedFile && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-3">
           {/* Card 1: Android Camera */}
           <button
             type="button"
             onClick={() => cameraInputRef.current?.click()}
-            className="min-h-[120px] rounded-2xl bg-teal-700 text-white p-5 text-right flex flex-col justify-between hover:bg-teal-800 transition-colors cursor-pointer"
+            className="min-h-[104px] rounded-2xl bg-teal-700 text-white p-3 sm:p-5 text-right flex flex-col justify-between hover:bg-teal-800 transition-colors cursor-pointer"
           >
             <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center">
               <Camera className="w-6 h-6" />
@@ -869,7 +883,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           <button
             type="button"
             onClick={() => pdfInputRef.current?.click()}
-            className="min-h-[120px] rounded-2xl bg-white border border-slate-200 p-5 text-right flex flex-col justify-between hover:border-teal-500 hover:bg-slate-50/60 transition-colors cursor-pointer"
+            className="min-h-[104px] rounded-2xl bg-white border border-slate-200 p-3 sm:p-5 text-right flex flex-col justify-between hover:border-teal-500 hover:bg-slate-50/60 transition-colors cursor-pointer"
           >
             <div className="w-11 h-11 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center">
               <FileText className="w-6 h-6" />
@@ -879,7 +893,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
                 انتخاب فایل PDF فاکتور
               </div>
               <p className="mt-1 text-xs text-slate-600 leading-relaxed">
-                تبدیل خودکار تک‌تک صفحات PDF به تصویر باکیفیت پیش از استخراج متن برای خوانش دقیق جدول‌ها
+                ثبت اصل فایل یا تحلیل حداکثر ۱۰ صفحه
               </p>
             </div>
           </button>
@@ -888,7 +902,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           <button
             type="button"
             onClick={() => imageInputRef.current?.click()}
-            className="min-h-[112px] rounded-2xl bg-white border border-slate-200 p-5 text-right flex flex-col justify-between hover:border-teal-500 hover:bg-slate-50/60 transition-colors cursor-pointer"
+            className="min-h-[104px] rounded-2xl bg-white border border-slate-200 p-3 sm:p-5 text-right flex flex-col justify-between hover:border-teal-500 hover:bg-slate-50/60 transition-colors cursor-pointer"
           >
             <div className="w-11 h-11 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
               <ImageIcon className="w-6 h-6" />
@@ -907,7 +921,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           <button
             type="button"
             onClick={() => textFileInputRef.current?.click()}
-            className="min-h-[112px] rounded-2xl bg-white border border-slate-200 p-5 text-right flex flex-col justify-between hover:border-teal-500 hover:bg-slate-50/60 transition-colors cursor-pointer"
+            className="min-h-[104px] rounded-2xl bg-white border border-slate-200 p-3 sm:p-5 text-right flex flex-col justify-between hover:border-teal-500 hover:bg-slate-50/60 transition-colors cursor-pointer"
           >
             <div className="w-11 h-11 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
               <FileSpreadsheet className="w-6 h-6" />

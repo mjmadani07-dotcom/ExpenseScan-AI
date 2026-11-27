@@ -503,6 +503,7 @@ export default function App({ repository = webRepository, onLock }: { repository
       <header className="md:hidden sticky top-0 z-30 h-14 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 flex items-center justify-between gap-3">
         <span className="text-base font-bold text-slate-900 truncate">حساب‌یار</span>
         {repository.mode==='web' && <PWAInstallButton compact />}
+        {onLock&&<button type="button" onClick={onLock} className="min-h-10 px-3 text-xs border rounded-lg">قفل</button>}
       </header>
 
       {/* Toast Confirmation */}

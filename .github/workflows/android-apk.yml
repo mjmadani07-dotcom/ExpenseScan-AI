@@ -16,6 +16,10 @@ on:
       - 'src/storage/portableBackup.ts'
       - 'src/storage/localLedgerRepository.ts'
       - 'src/storage/ledgerRows.ts'
+      - 'src/components/DraftReviewPanel.tsx'
+      - 'src/components/SettingsBudgets.tsx'
+      - 'src/utils/clientAiExtract.ts'
+      - 'src/App.tsx'
 permissions:
   contents: read
 concurrency:

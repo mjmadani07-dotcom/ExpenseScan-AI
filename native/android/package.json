@@ -5,6 +5,7 @@
   "dependencies": {
     "@capacitor/core": "7.4.5",
     "@capacitor/android": "7.4.5",
-    "@capacitor/cli": "7.4.5"
+    "@capacitor/cli": "7.4.5",
+    "@fontsource/vazirmatn": "5.2.8"
   }
 }

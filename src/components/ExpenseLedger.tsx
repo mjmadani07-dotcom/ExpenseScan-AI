@@ -198,6 +198,12 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
     [expenses, filters, rates]
   );
 
+  const PAGE_SIZE=30;
+  const [page,setPage]=useState(0);
+  useEffect(()=>setPage(0),[filters]);
+  const pageCount=Math.max(1,Math.ceil(filtered.length/PAGE_SIZE));
+  const currentPage=Math.min(page,pageCount-1);
+  const visibleExpenses=filtered.slice(currentPage*PAGE_SIZE,(currentPage+1)*PAGE_SIZE);
   const filteredTotalIRT = useMemo(
     () =>
       filtered.reduce(
@@ -807,7 +813,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
-                  {filtered.map((exp) => {
+                  {visibleExpenses.map((exp) => {
                     const paySummary = summarizeExpensePayments(exp, rates);
 
                     const trancheCount = exp.paymentTranches?.length ?? 0;
@@ -880,7 +886,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
 
             {/* Mobile Tap Rows */}
             <div className="md:hidden divide-y divide-slate-100">
-              {filtered.map((exp) => {
+              {visibleExpenses.map((exp) => {
                 const paySummary = summarizeExpensePayments(exp, rates);
 
                 return (
@@ -936,6 +942,7 @@ export const ExpenseLedger: React.FC<ExpenseLedgerProps> = ({
         )}
       </div>
 
+      {filtered.length>PAGE_SIZE&&<div className="flex items-center justify-between gap-2 rounded-xl border bg-white p-3 text-xs"><button type="button" disabled={currentPage===0} onClick={()=>setPage(currentPage-1)} className="min-h-11 px-3 border rounded-lg disabled:opacity-40">قبلی</button><span>صفحه {toPersianDigits(currentPage+1)} از {toPersianDigits(pageCount)} · {toPersianDigits(filtered.length)} سند</span><button type="button" disabled={currentPage>=pageCount-1} onClick={()=>setPage(currentPage+1)} className="min-h-11 px-3 border rounded-lg disabled:opacity-40">بعدی</button></div>}
       {/* JSON Export/Import Modal */}
       {showJsonModal && (
         <div

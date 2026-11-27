@@ -1,3 +1,5 @@
+import { testAiConnection } from '../utils/clientAiExtract';
+import { isAndroidRuntime } from '../storage/androidSnapshotStore';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -130,6 +132,8 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
   const [saving, setSaving] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [testing,setTesting]=useState(false);
+  const [testResult,setTestResult]=useState<{ok:boolean;text:string}|null>(null);
   const [keyInput, setKeyInput] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [isSavingKey, setIsSavingKey] = useState(false);
@@ -178,6 +182,7 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
     localAiConfig.baseUrls?.[localAiConfig.provider] ??
     (localAiConfig.provider === aiConfig.provider ? localAiConfig.baseUrl ?? '' : '');
   const seedCount = countSeedExpenses(expenses);
+  useEffect(()=>setTestResult(null),[localAiConfig,keyInput,activeLocalKey]);
 
   const handleSelectProvider = (providerId: AiProviderId) => {
     const info = providersList.find((p) => p.id === providerId) ?? providersList[0];
@@ -226,6 +231,22 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
     });
   };
 
+  const handleTestConnection=async()=>{
+    if(testing)return;
+    setTestResult(null);
+    try{
+      const apiKey=keyInput.trim()||activeLocalKey?.trim();if(!apiKey)throw new Error('کلید API را وارد کنید.');
+      const baseUrl=validateClientBaseUrl(currentBaseUrlValue);
+      const endpoint=new URL(baseUrl||DEFAULT_AI_BASE_URLS[localAiConfig.provider]);
+      if(isAndroidRuntime()&&endpoint.protocol!=='https:')throw new Error('در اندروید فقط HTTPS مجاز است.');
+      if(!window.confirm('یک درخواست آزمایشی بدون اطلاعات واقعی مالی به '+endpoint.host+' با مدل '+localAiConfig.model+' ارسال شود؟ ممکن است هزینه اندکی داشته باشد.'))return;
+      setTesting(true);
+      const provider=localAiConfig.provider,model=localAiConfig.model;
+      await testAiConnection({provider,model,apiKey,baseUrl,secureTransport:isAndroidRuntime()});
+      setTestResult({ok:true,text:'پاسخ ساختاریافته آزمایشی از '+provider+' / '+model+' دریافت شد. اطلاعاتی ثبت نشد.'});
+    }catch(e){setTestResult({ok:false,text:e instanceof Error?e.message:'آزمایش ناموفق بود.'});}
+    finally{setTesting(false);}
+  };
   const handleSaveDeviceKey = async () => {
     const trimmed = keyInput.trim();
     if (!trimmed) return;
@@ -646,6 +667,7 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
             </button>
           </div>
 
+          <div className="space-y-2 rounded-xl border border-slate-200 p-3"><button type="button" disabled={testing||(!keyInput.trim()&&!activeLocalKey)} onClick={()=>void handleTestConnection()} className="min-h-11 px-4 rounded-xl bg-teal-700 text-white text-sm disabled:opacity-40">{testing?'در حال آزمایش…':'آزمایش اتصال و مدل'}</button><p className="text-xs text-slate-600">از تنظیمات فعلی (حتی ذخیره‌نشده) و فقط یک رسید فرضی استفاده می‌کند؛ داده واقعی ارسال یا سندی ثبت نمی‌شود.</p>{testResult&&<p role={testResult.ok?'status':'alert'} className={testResult.ok?'text-teal-800 text-xs':'text-red-700 text-xs'}>{testResult.text}</p>}</div>
           <div className="flex items-start gap-2 text-[11px] text-slate-600 leading-relaxed">
             <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div>

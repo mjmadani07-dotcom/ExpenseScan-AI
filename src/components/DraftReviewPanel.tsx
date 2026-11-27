@@ -135,6 +135,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if(isSaving)return;
     setValidationError(null);
     const chosen = drafts.filter((d) => d.selected);
     if (chosen.length === 0) {
@@ -202,11 +203,11 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
             بررسی و تایید نهایی پیش‌نویس
           </h1>
           <p className="mt-1 text-sm text-slate-600">
-            اطلاعات استخراج‌شده را بازبینی یا ویرایش کنید. تاریخ‌ها به شمسی است و نرخ تسعیر اسناد ارزی برای همین سند ذخیره می‌شود.
+            عنوان، فروشنده و مبلغ را بررسی کنید و ثبت نهایی را بزنید. تاریخ شمسی و جزئیات پرداخت قابل ویرایش‌اند.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 sticky top-14 z-20 bg-slate-50/95 p-2 rounded-xl md:static md:p-0">
           <button
             type="button"
             onClick={onCancel}
@@ -330,7 +331,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
             return (
               <div
                 key={draft.tempId}
-                className={`rounded-2xl bg-white border p-5 space-y-5 transition-opacity ${
+                className={`rounded-2xl bg-white border p-3 sm:p-5 space-y-5 transition-opacity ${
                   draft.selected ? 'border-slate-200' : 'border-slate-200 opacity-60'
                 }`}
               >
@@ -793,6 +794,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                   </div>
                 </div>
 
+                <details className="rounded-xl border border-slate-200 p-3 space-y-3" open={(draft.paymentTranches?.length??0)>0||draft.lineItems.length>0?true:undefined}><summary className="cursor-pointer text-sm font-semibold py-2">اقلام و جزئیات پرداخت ({toPersianDigits(draft.lineItems.length)} قلم)</summary>
                 {/* Split / Partial Payment Tranches */}
                 <PaymentTranchesEditor
                   idPrefix={draft.tempId}
@@ -900,6 +902,7 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                     </div>
                   )}
                 </div>
+                </details>
               </div>
             );
           })}
