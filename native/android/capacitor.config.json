@@ -1,0 +1,13 @@
+{
+  "appId": "ir.expensescan.hesabyar",
+  "appName": "حساب‌یار",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  }
+}

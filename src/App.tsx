@@ -1,3 +1,4 @@
+import { minimizeAndroid } from './storage/androidSnapshotStore';
 import { WebLedgerRepository, type LedgerRepository, type DraftSession } from './storage/ledgerRepository';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -401,6 +402,18 @@ export default function App({ repository = webRepository }: { repository?: Ledge
     }
   };
 
+  useEffect(()=>{
+    if(repository.mode!=='local')return;
+    const back=()=>{
+      if(isSavingBatch)return;
+      if(selectedExpense){setSelectedExpense(null);return;}
+      if(activeTab!=='overview'){setActiveTab('overview');return;}
+      void minimizeAndroid().catch(()=>{});
+    };
+    window.addEventListener('expensescan-native-back',back);
+    return ()=>window.removeEventListener('expensescan-native-back',back);
+  },[repository,selectedExpense,activeTab,isSavingBatch]);
+
   const navigateTab = (tab: ActiveTab) => {
     // Preserve reviewed/paid AI drafts while navigating between tabs.
     if (isSavingBatch) return;
@@ -488,7 +501,7 @@ export default function App({ repository = webRepository }: { repository?: Ledge
       {/* Mobile Compact Sticky Top Bar (56px) */}
       <header className="md:hidden sticky top-0 z-30 h-14 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 flex items-center justify-between gap-3">
         <span className="text-base font-bold text-slate-900 truncate">حساب‌یار</span>
-        <PWAInstallButton compact />
+        {repository.mode==='web' && <PWAInstallButton compact />}
       </header>
 
       {/* Toast Confirmation */}

@@ -20,6 +20,7 @@ backups/
 *.db-shm
 
 # Android local/build/signing material
+/.android-build/
 android/.gradle/
 android/**/build/
 android/local.properties

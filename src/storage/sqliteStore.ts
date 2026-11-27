@@ -25,7 +25,7 @@ export interface SnapshotStore {
 }
 
 const VERSION=1;
-function decode(raw:string):StoredState {
+export function decodeStoredState(raw:string):StoredState {
   const state=JSON.parse(raw) as StoredState;
   if(!state||!state.ledger||!Array.isArray(state.ledger.expenses)||!Array.isArray(state.ledger.budgets)||!Array.isArray(state.ledger.categories)||!state.ledger.rates||!('draft' in state))throw new Error('پایگاه داده نامعتبر است؛ بازیابی لازم است.');
   const validated=parseAndValidateLedgerImport(state.ledger);
@@ -49,17 +49,17 @@ export class SqliteSnapshotStore implements SnapshotStore {
       }else if(version!==VERSION)throw new Error('نسخه پایگاه داده پشتیبانی نمی‌شود؛ داده‌ها تغییر نکردند.');
       const row=await tx.query<{revision:number;payload:string}>('SELECT revision,payload FROM ledger_state WHERE id=1');
       if(row.length!==1)throw new Error('رکورد اصلی پایگاه داده پیدا نشد؛ بازیابی لازم است.');
-      decode(row[0].payload);
+      decodeStoredState(row[0].payload);
     });
   }
   async read(){
     const rows=await this.db.query<{revision:number;payload:string}>('SELECT revision,payload FROM ledger_state WHERE id=1');
     if(rows.length!==1||!Number.isSafeInteger(rows[0].revision))throw new Error('رکورد دفتر معتبر نیست.');
-    return {revision:rows[0].revision,state:decode(rows[0].payload)};
+    return {revision:rows[0].revision,state:decodeStoredState(rows[0].payload)};
   }
   async compareAndSwap(revision:number,state:StoredState){
     const payload=JSON.stringify(state);
-    decode(payload);
+    decodeStoredState(payload);
     const result=await this.db.run('UPDATE ledger_state SET revision=revision+1,payload=? WHERE id=1 AND revision=?',[payload,revision]);
     return result.changes===1;
   }
