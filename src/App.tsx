@@ -54,6 +54,8 @@ import {
   saveLocalApiKey,
 } from './utils/localKeyVault';
 
+import {readCaptureCheckpoint,markCapture,clearCapture,SINGLE_SCOPE} from './storage/workflowRecovery';
+
 type ActiveTab = 'overview' | 'capture' | 'ledger' | 'settings';
 
 const CACHE_KEY = 'hesabyar_ledger_cache_v1';
@@ -64,7 +66,15 @@ export default function App({ repository = webRepository, onLock,workspace }: { 
   const activity=useWorkspaceActivity();
   const [leaving,setLeaving]=useState(false),[leaveError,setLeaveError]=useState('');
   const leavingRef=useRef(false);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
+  const captureScope=workspace?.profile.id??SINGLE_SCOPE;
+  const [activeTab, updateActiveTab] = useState<ActiveTab>(()=>repository.mode==='local'&&readCaptureCheckpoint()?.scope===captureScope?'capture':'overview');
+  const setActiveTab=(tab:ActiveTab)=>{
+    if(repository.mode==='local'){
+      if(tab==='capture'){if(readCaptureCheckpoint()?.scope!==captureScope)markCapture(captureScope);}
+      else clearCapture(captureScope);
+    }
+    updateActiveTab(tab);
+  };
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit>(() => {
     try {
       const saved = localStorage.getItem(DISPLAY_UNIT_KEY);
@@ -610,6 +620,7 @@ export default function App({ repository = webRepository, onLock,workspace }: { 
             {activeTab === 'capture' && !pendingDrafts && (
               <CaptureWorkspace
                 localMode={repository.mode === 'local'}
+                captureScope={repository.mode==='local'?captureScope:undefined}
                 displayUnit={displayUnit}
                 categories={activeCategories}
                 rates={ledger.rates}

@@ -6,6 +6,7 @@ import type { DraftSession } from '../storage/ledgerRepository';
 import { WorkspaceActivityProvider } from './WorkspaceActivity';
 import {ConsolidatedDashboard} from './ConsolidatedDashboard';
 import {MultiLedgerBackupPanel} from './MultiLedgerBackupPanel';
+import {readCaptureCheckpoint,clearCapture} from '../storage/workflowRecovery';
 const COLORS=['#0f766e','#2563eb','#7c3aed','#b45309','#be185d','#475569'];
 const message=(e:unknown)=>e instanceof Error?e.message:'عملیات ناموفق بود؛ دوباره تلاش کنید.';
 export function LedgerCatalog({items,busy,error,onOpen,onCreate,onEdit,onLock,onRefresh,onReport,onBackup}:{items:LedgerCatalogItem[];busy:boolean;error:string;onOpen:(id:string)=>void;onCreate:(name:string,color:string)=>void;onEdit:(id:string,patch:{name?:string;color?:string;archived?:boolean})=>void;onLock:()=>void;onRefresh:()=>void;onReport?:()=>void;onBackup?:()=>void}){
@@ -41,7 +42,13 @@ export function MultiLedgerWorkspace({session,onLock}:{session:MultiLedgerSessio
  const operating=useRef(false),alive=useRef(true);
  const run=async(fn:()=>Promise<void>)=>{if(operating.current)return;operating.current=true;setBusy(true);setError('');try{await fn();}catch(e){if(alive.current)setError(message(e));}finally{operating.current=false;if(alive.current)setBusy(false);}};
  const refresh=async()=>{const next=await session.catalog();if(alive.current)setItems(next);};
- useEffect(()=>{alive.current=true;void run(refresh);return()=>{alive.current=false;};},[session]);
+ useEffect(()=>{alive.current=true;void run(async()=>{
+  const next=await session.catalog();if(!alive.current)return;setItems(next);
+  const checkpoint=readCaptureCheckpoint();if(!checkpoint||checkpoint.scope==='single')return;
+  if(!next.some(w=>w.profile.id===checkpoint.scope&&!w.profile.archived)){clearCapture(checkpoint.scope);return;}
+  const opened=await session.open(checkpoint.scope);
+  if(alive.current)setActive(opened);else opened.repository.dispose();
+ });return()=>{alive.current=false;};},[session]);
  const close=async(draft:DraftSession|null)=>{
    if(operating.current)throw new Error('عملیات دیگری در حال انجام است.');
    operating.current=true;setBusy(true);

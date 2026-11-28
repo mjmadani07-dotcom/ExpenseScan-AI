@@ -47,3 +47,6 @@ Catalog includes an independent backup screen. Export uses verified native publi
 
 ## Phase 5D: legacy import
 Encrypted v1 and ESBACK2 archives are imported into a new named ledger only, using the normal append-only CAS. Full ESBACK3 replacement remains separate. Wrong password, invalid/truncated archive, duplicate names and stale revisions must not replace existing ledgers. Existing originals are staged by hash. CI and physical device tests remain required.
+
+## Workflow recovery 1: capture route checkpoint
+Only opaque ledger ID, capture route and picker kind persist in private WebView localStorage. No financial data, attachment IDs, original paths, filenames or credentials. After genuine authentication, active scope is validated against the catalog and capture resumes; existing encrypted drafts load via the repository. If an unfinished picker marker survives without a draft, show an explicit retry notice; no automatic approval. Leaving capture clears its route. This is route recovery only, not recovery of returned originals or text not yet persisted. Activity recreation test simulates pending picker marker; actual camera, >5-minute background, process death and secure original staging remain release gates.

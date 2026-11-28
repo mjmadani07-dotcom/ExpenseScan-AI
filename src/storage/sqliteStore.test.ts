@@ -602,3 +602,11 @@ test('legacy encrypted v1 and v2 backups append only, preserving existing scopes
  assert.equal(state.workspaces.length,3);assert.equal(state.workspaces[0].state.ledger.expenses.length,0);
  assert.equal(state.workspaces[2].state.ledger.expenses[0].id,'legacy-doc');
 });
+
+test('capture route checkpoint rejects unrelated or sensitive fields and malformed scope',async()=>{
+ const {parseCaptureCheckpoint}=await import('./workflowRecovery');
+ assert.deepEqual(parseCaptureCheckpoint('{"version":1,"scope":"jam","picker":"camera"}'),{version:1,scope:'jam',picker:'camera'});
+ assert.equal(parseCaptureCheckpoint('{"version":1,"scope":"jam","picker":"camera","amount":42}'),null);
+ assert.equal(parseCaptureCheckpoint('{"version":1,"scope":"../jam","picker":"camera"}'),null);
+ assert.equal(parseCaptureCheckpoint('{"version":1,"scope":"jam","picker":"unknown"}'),null);
+});

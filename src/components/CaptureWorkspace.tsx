@@ -43,6 +43,7 @@ interface CaptureWorkspaceProps {
   rates: ExchangeRates;
   displayUnit: DisplayUnit;
   localMode?: boolean;
+  captureScope?:string;
   aiConfig: AiConfig;
   aiStatus: AiProviderStatus | null;
   localApiKeys: Partial<Record<AiProviderId, string>>;
@@ -53,6 +54,7 @@ interface CaptureWorkspaceProps {
   onDraftsReady: (drafts: ExtractedExpenseDraft[], previewPages: string[]) => void;
 }
 
+import {readCaptureCheckpoint,markCapture,type PickerKind} from '../storage/workflowRecovery';
 type InputMode = 'file_photo' | 'text';
 
 interface StagedMediaFile {
@@ -87,6 +89,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   rates,
   displayUnit,
   localMode = false,
+  captureScope,
   aiConfig,
   aiStatus,
   localApiKeys,
@@ -97,7 +100,10 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   onDraftsReady,
 }) => {
   const activeCategories = resolveCategories(categories);
-  const [mode, setMode] = useState<InputMode>('file_photo');
+  const [interrupted,setInterrupted]=useState<PickerKind|null>(()=>{const v=readCaptureCheckpoint();return captureScope&&v?.scope===captureScope?v.picker:null;});
+  const [mode, setMode] = useState<InputMode>(()=>interrupted==='text'?'text':'file_photo');
+  const startPicker=(kind:PickerKind,input:HTMLInputElement|null)=>{if(!input)return;if(captureScope)markCapture(captureScope,kind);setInterrupted(null);input.click();};
+  const finishPicker=()=>{if(captureScope)markCapture(captureScope);setInterrupted(null);};
   const [rawText, setRawText] = useState('');
   const originalText=useRef<File|null>(null);
   const [textFileName, setTextFileName] = useState<string | undefined>(undefined);
@@ -137,6 +143,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   };
 
   const handleRemoveStagedFile = () => {
+    finishPicker();
     preparationCancelledRef.current = true;
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
@@ -148,6 +155,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
   };
 
   const handleRemoveTextFile = () => {
+    finishPicker();
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     originalText.current=null;
@@ -419,6 +427,10 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {interrupted&&<div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs space-y-2">
+        <p>به محل ثبت سند قبلی بازگشتید. اگر تصویر یا فایل به برنامه بازنگشته است، دوباره آن را انتخاب کنید؛ هیچ سندی خودکار ثبت نشده است.</p>
+        <button type="button" className="border rounded-lg px-3 py-2" onClick={finishPicker}>متوجه شدم</button>
+      </div>}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 text-balance">
@@ -871,7 +883,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           {/* Card 1: Android Camera */}
           <button
             type="button"
-            onClick={() => cameraInputRef.current?.click()}
+            onClick={() => startPicker('camera',cameraInputRef.current)}
             className="min-h-[104px] rounded-2xl bg-teal-700 text-white p-3 sm:p-5 text-right flex flex-col justify-between hover:bg-teal-800 transition-colors cursor-pointer"
           >
             <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center">
@@ -888,7 +900,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           {/* Card 2: PDF with Auto Page-to-Image Rendering */}
           <button
             type="button"
-            onClick={() => pdfInputRef.current?.click()}
+            onClick={() => startPicker('pdf',pdfInputRef.current)}
             className="min-h-[104px] rounded-2xl bg-white border border-slate-200 p-3 sm:p-5 text-right flex flex-col justify-between hover:border-teal-500 hover:bg-slate-50/60 transition-colors cursor-pointer"
           >
             <div className="w-11 h-11 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center">
@@ -907,7 +919,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           {/* Card 3: Gallery Image */}
           <button
             type="button"
-            onClick={() => imageInputRef.current?.click()}
+            onClick={() => startPicker('image',imageInputRef.current)}
             className="min-h-[104px] rounded-2xl bg-white border border-slate-200 p-3 sm:p-5 text-right flex flex-col justify-between hover:border-teal-500 hover:bg-slate-50/60 transition-colors cursor-pointer"
           >
             <div className="w-11 h-11 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
@@ -926,7 +938,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
           {/* Card 4: Text File */}
           <button
             type="button"
-            onClick={() => textFileInputRef.current?.click()}
+            onClick={() => startPicker('text',textFileInputRef.current)}
             className="min-h-[104px] rounded-2xl bg-white border border-slate-200 p-3 sm:p-5 text-right flex flex-col justify-between hover:border-teal-500 hover:bg-slate-50/60 transition-colors cursor-pointer"
           >
             <div className="w-11 h-11 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
@@ -1003,7 +1015,7 @@ export const CaptureWorkspace: React.FC<CaptureWorkspaceProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => textFileInputRef.current?.click()}
+                onClick={() => startPicker('text',textFileInputRef.current)}
                 className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
               >
                 <Upload className="w-4 h-4" />

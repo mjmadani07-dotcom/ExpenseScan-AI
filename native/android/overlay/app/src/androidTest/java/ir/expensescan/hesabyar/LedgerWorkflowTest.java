@@ -125,7 +125,8 @@ public class LedgerWorkflowTest {
         }catch(AssertionError|Exception ex){diagnostics("Device lockscreen unlock failed");throw ex;}
     }
     private void unlock(ActivityScenario<MainActivity> app)throws Exception{unlock(app,false);}
-    private void unlock(ActivityScenario<MainActivity> app,boolean multi)throws Exception{
+    private void unlock(ActivityScenario<MainActivity> app,boolean multi)throws Exception{unlock(app,multi,false);}
+    private void unlock(ActivityScenario<MainActivity> app,boolean multi,boolean resumeCapture)throws Exception{
         unlockDeviceScreen();
         text(app,"حساب‌یار قفل است");
         JSONObject status=bridge(app,"Capacitor.Plugins.LedgerStorage.sessionStatus()");
@@ -175,7 +176,7 @@ public class LedgerWorkflowTest {
             end=android.os.SystemClock.elapsedRealtime()+25000;
             while(credentialActivity(resumed())&&android.os.SystemClock.elapsedRealtime()<end)Thread.sleep(300);
             if(credentialActivity(resumed())){diagnostics("Credential verification did not return");fail("System credential did not verify");}
-            waitFor(app,multi?"document.querySelector('h1')?.textContent.trim()==='دفاتر مالی'":"document.querySelector('nav[aria-label=\"ناوبری موبایل\"]')","App did not unlock with system credential");
+            waitFor(app,multi&&!resumeCapture?"document.querySelector('h1')?.textContent.trim()==='دفاتر مالی'":"document.querySelector('nav[aria-label=\"ناوبری موبایل\"]')","App did not unlock with system credential");
             waitFor(app,"!document.body.innerText.includes('در حال بارگذاری')","Ledger loading failed");
         }catch(AssertionError|Exception ex){diagnostics("Unlock failed");throw ex;}
     }
@@ -496,6 +497,16 @@ public class LedgerWorkflowTest {
             openCatalogLedger(app,"دفتر کرج");nav(app,"هزینه‌ها");text(app,"Karaj E2E");
             returnToCatalog(app);openCatalogLedger(app,"دفتر جم");nav(app,"هزینه‌ها");text(app,"Jam E2E");
             waitFor(app,"!document.body.innerText.includes('Karaj E2E')","Restore crossed ledger boundary");
+            nav(app,"ثبت سند");text(app,"ثبت سند در دفتر:");
+            // Simulate an unfinished picker route only; real camera/process kill
+            // requires separate native/physical acceptance.
+            eval(app,"(()=>{const v=JSON.parse(localStorage.getItem('hesabyar_capture_route_v1'));v.picker='camera';localStorage.setItem('hesabyar_capture_route_v1',JSON.stringify(v));return true})()");
+            app.recreate();
+            text(app,"حساب‌یار قفل است");
+            unlock(app,true,true);
+            text(app,"به محل ثبت سند قبلی بازگشتید.");
+            waitFor(app,"Array.from(document.querySelectorAll('header')).some(h=>h.innerText.includes('دفتر جم'))","Recovered wrong ledger");
+            click(app,"متوجه شدم");nav(app,"هزینه‌ها");text(app,"Jam E2E");
             click(app,"قفل");text(app,"حساب‌یار قفل است");
         }
     }
