@@ -344,7 +344,10 @@ public class LedgerWorkflowTest {
         nav(app,"داشبورد");click(app,"تغییر دفتر");text(app,"دفاتر مالی");
     }
     private byte[] readReportFile(String extension)throws Exception{
-        if(!"pdf".equals(extension)&&!"xlsx".equals(extension)&&!"json".equals(extension))throw new IllegalArgumentException("extension");
+        return readPublishedFile(extension,"json".equals(extension)?"hesabyar-ledger-":"hesabyar-consolidated-");
+    }
+    private byte[] readPublishedFile(String extension,String prefix)throws Exception{
+        if(!"pdf".equals(extension)&&!"xlsx".equals(extension)&&!"json".equals(extension)&&!"esbackup3".equals(extension))throw new IllegalArgumentException("extension");
         // Verify the actual published MediaStore download as its owning app.
         // Shell/FUSE visibility is not the contract of Android scoped storage.
         android.content.Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
@@ -356,10 +359,10 @@ public class LedgerWorkflowTest {
         String pending=android.provider.MediaStore.MediaColumns.IS_PENDING;
         String size=android.provider.MediaStore.MediaColumns.SIZE;
         String mime=android.provider.MediaStore.MediaColumns.MIME_TYPE;
-        String expectedMime="pdf".equals(extension)?"application/pdf":"json".equals(extension)?"application/json":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        String expectedMime="pdf".equals(extension)?"application/pdf":"json".equals(extension)?"application/json":"esbackup3".equals(extension)?"application/octet-stream":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
         String relativePath=android.os.Environment.DIRECTORY_DOWNLOADS+"/HesabYar/";
         String selection=name+" LIKE ? AND "+path+" = ? AND "+pending+" = ?";
-        String[] args={("json".equals(extension)?"hesabyar-ledger-":"hesabyar-consolidated-")+"%."+extension,relativePath,"0"};
+        String[] args={prefix+"%."+extension,relativePath,"0"};
         long deadline=android.os.SystemClock.elapsedRealtime()+10000;
         do{
             try(android.database.Cursor cursor=resolver.query(collection,new String[]{id,name,path,pending,size,mime},selection,args,null)){
@@ -474,6 +477,25 @@ public class LedgerWorkflowTest {
             JSONArray exported=json.getJSONArray("expenses");assertEquals(1,exported.length());
             assertEquals("Karaj E2E",exported.getJSONObject(0).getString("title"));
             assertEquals(34567,exported.getJSONObject(0).getInt("amount"));
+            returnToCatalog(app);click(app,"پشتیبان‌گیری و بازیابی همه دفاتر");
+            field(app,"#multi-backup-password",PASSWORD);field(app,"#multi-backup-repeat",PASSWORD);
+            click(app,"ذخیره پشتیبان همه دفاتر");text(app,"پشتیبان همه دفاتر ذخیره شد.");
+            byte[] archive=readPublishedFile("esbackup3","HesabYar-all-");
+            assertEquals("ESBACK3\n",new String(archive,0,8,StandardCharsets.US_ASCII));
+            click(app,"دفاتر مالی");createCatalogLedger(app,"Temporary restore fixture");
+            click(app,"پشتیبان‌گیری و بازیابی همه دفاتر");
+            field(app,"#multi-backup-password",PASSWORD);field(app,"#multi-backup-repeat",PASSWORD);
+            file(app,"#multi-backup-file","test.esbackup3","application/octet-stream",android.util.Base64.encodeToString(archive,android.util.Base64.NO_WRAP));
+            click(app,"بررسی پشتیبان چنددفتره");text(app,"پیش‌نمایش دفاتر قابل بازیابی");
+            eval(app,"document.querySelector('#multi-restore-confirm').click()");
+            click(app,"تأیید بازیابی همه دفاتر");text(app,"بازیابی همه دفاتر انجام شد.");
+            byte[] safety=readPublishedFile("esbackup3","HesabYar-before-restore-");
+            assertEquals("ESBACK3\n",new String(safety,0,8,StandardCharsets.US_ASCII));
+            click(app,"دفاتر مالی");
+            waitFor(app,"!document.body.innerText.includes('Temporary restore fixture')","Old catalog survived replacement");
+            openCatalogLedger(app,"دفتر کرج");nav(app,"هزینه‌ها");text(app,"Karaj E2E");
+            returnToCatalog(app);openCatalogLedger(app,"دفتر جم");nav(app,"هزینه‌ها");text(app,"Jam E2E");
+            waitFor(app,"!document.body.innerText.includes('Karaj E2E')","Restore crossed ledger boundary");
             click(app,"قفل");text(app,"حساب‌یار قفل است");
         }
     }

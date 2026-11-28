@@ -5,9 +5,10 @@ import type { LedgerCatalogItem,MultiLedgerSession,OpenWorkspace } from '../stor
 import type { DraftSession } from '../storage/ledgerRepository';
 import { WorkspaceActivityProvider } from './WorkspaceActivity';
 import {ConsolidatedDashboard} from './ConsolidatedDashboard';
+import {MultiLedgerBackupPanel} from './MultiLedgerBackupPanel';
 const COLORS=['#0f766e','#2563eb','#7c3aed','#b45309','#be185d','#475569'];
 const message=(e:unknown)=>e instanceof Error?e.message:'عملیات ناموفق بود؛ دوباره تلاش کنید.';
-export function LedgerCatalog({items,busy,error,onOpen,onCreate,onEdit,onLock,onRefresh,onReport}:{items:LedgerCatalogItem[];busy:boolean;error:string;onOpen:(id:string)=>void;onCreate:(name:string,color:string)=>void;onEdit:(id:string,patch:{name?:string;color?:string;archived?:boolean})=>void;onLock:()=>void;onRefresh:()=>void;onReport?:()=>void}){
+export function LedgerCatalog({items,busy,error,onOpen,onCreate,onEdit,onLock,onRefresh,onReport,onBackup}:{items:LedgerCatalogItem[];busy:boolean;error:string;onOpen:(id:string)=>void;onCreate:(name:string,color:string)=>void;onEdit:(id:string,patch:{name?:string;color?:string;archived?:boolean})=>void;onLock:()=>void;onRefresh:()=>void;onReport?:()=>void;onBackup?:()=>void}){
  const [editing,setEditing]=useState<string|null>(null),[name,setName]=useState(''),[color,setColor]=useState(COLORS[0]),[archived,setArchived]=useState(false);
  const begin=(item?:LedgerCatalogItem)=>{setEditing(item?item.profile.id:'new');setName(item?.profile.name??'');setColor(item?.profile.color??COLORS[0]);};
  const submit=(e:React.FormEvent)=>{e.preventDefault();if(busy||!name.trim())return;if(editing==='new')onCreate(name,color);else if(editing)onEdit(editing,{name,color});setEditing(null);};
@@ -18,6 +19,7 @@ export function LedgerCatalog({items,busy,error,onOpen,onCreate,onEdit,onLock,on
    <p className="text-sm text-slate-600">برای ثبت و ویرایش هزینه‌ها یک دفتر را باز کنید. اسناد، پیش‌نویس‌ها، بودجه و دسته‌بندی هر دفتر مستقل است.</p>
    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">محیط آزمایش داخلی چنددفتره؛ تا تأیید پشتیبان‌گیری همه دفاتر، از اطلاعات واقعی استفاده نکنید.</div>
    {onReport&&<button type="button" disabled={busy||editing!==null||!items.length} onClick={onReport} className="w-full min-h-12 rounded-xl bg-teal-700 text-white font-bold text-sm">گزارش تلفیقی دفاتر</button>}
+   {onBackup&&<button type="button" disabled={busy||editing!==null||!items.length} onClick={onBackup} className="w-full min-h-12 rounded-xl border bg-white font-bold text-sm">پشتیبان‌گیری و بازیابی همه دفاتر</button>}
    {error&&<div role="alert" className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-800">{error}<button type="button" disabled={busy} onClick={onRefresh} className="mr-2 underline">بارگذاری مجدد</button></div>}
    <div className="flex items-center justify-between gap-2 flex-wrap">
     <div className="flex bg-slate-200 p-1 rounded-xl text-xs"><button type="button" aria-pressed={!archived} disabled={busy} onClick={()=>{setArchived(false);setEditing(null);}} className={'min-h-10 px-3 rounded-lg '+(!archived?'bg-white font-bold':'')}>فعال ({items.filter(x=>!x.profile.archived).length.toLocaleString('fa-IR')})</button><button type="button" aria-pressed={archived} disabled={busy} onClick={()=>{setArchived(true);setEditing(null);}} className={'min-h-10 px-3 rounded-lg '+(archived?'bg-white font-bold':'')}>بایگانی ({items.filter(x=>x.profile.archived).length.toLocaleString('fa-IR')})</button></div>
@@ -35,7 +37,7 @@ export function LedgerCatalog({items,busy,error,onOpen,onCreate,onEdit,onLock,on
 }
 export function MultiLedgerWorkspace({session,onLock}:{session:MultiLedgerSession;onLock:()=>void}){
  const [items,setItems]=useState<LedgerCatalogItem[]>([]),[active,setActive]=useState<OpenWorkspace|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
- const [reporting,setReporting]=useState(false);
+ const [reporting,setReporting]=useState(false),[backing,setBacking]=useState(false);
  const operating=useRef(false),alive=useRef(true);
  const run=async(fn:()=>Promise<void>)=>{if(operating.current)return;operating.current=true;setBusy(true);setError('');try{await fn();}catch(e){if(alive.current)setError(message(e));}finally{operating.current=false;if(alive.current)setBusy(false);}};
  const refresh=async()=>{const next=await session.catalog();if(alive.current)setItems(next);};
@@ -48,7 +50,8 @@ export function MultiLedgerWorkspace({session,onLock}:{session:MultiLedgerSessio
  };
  if(active)return <WorkspaceActivityProvider key={active.profile.id}><App key={active.profile.id} repository={active.repository} onLock={onLock} workspace={{profile:active.profile,onExit:close}}/></WorkspaceActivityProvider>;
  if(reporting)return <ConsolidatedDashboard items={items} session={session} onBack={()=>setReporting(false)} onLock={onLock}/>;
- return <LedgerCatalog onReport={()=>setReporting(true)} items={items} busy={busy} error={error} onLock={onLock} onRefresh={()=>void run(refresh)}
+ if(backing)return <MultiLedgerBackupPanel items={items} session={session} onBack={()=>setBacking(false)} onLock={onLock} onRestored={setItems}/>;
+ return <LedgerCatalog onBackup={()=>setBacking(true)} onReport={()=>setReporting(true)} items={items} busy={busy} error={error} onLock={onLock} onRefresh={()=>void run(refresh)}
    onOpen={id=>void run(async()=>{const next=await session.open(id);if(alive.current)setActive(next);else next.repository.dispose();})}
    onCreate={(name,color)=>void run(async()=>{const next=await session.create(name,color);if(alive.current)setItems(next);})}
    onEdit={(id,patch)=>void run(async()=>{const next=await session.edit(id,patch);if(alive.current)setItems(next);})}/>;

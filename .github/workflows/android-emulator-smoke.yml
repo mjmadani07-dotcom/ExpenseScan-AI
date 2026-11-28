@@ -8,6 +8,8 @@ on:
       - 'native/android/overlay/app/src/androidTest/**'
       - 'native/android/overlay/app/src/main/**'
       - 'src/storage/**'
+      - 'src/components/MultiLedgerBackupPanel.tsx'
+      - 'src/components/MultiLedgerWorkspace.tsx'
       - 'docs/ANDROID_RELEASE_CHECKLIST.md'
       - 'scripts/prepare-android.mjs'
 permissions:

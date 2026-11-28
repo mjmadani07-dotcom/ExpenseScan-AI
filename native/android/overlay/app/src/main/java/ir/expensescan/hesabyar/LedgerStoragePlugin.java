@@ -542,11 +542,19 @@ public class LedgerStoragePlugin extends Plugin {
         boolean success=false;
         try{
             if(!sessionValid())throw new IllegalStateException("Session expired");
+            long expected=source.length();
+            MessageDigest digest=MessageDigest.getInstance("SHA-256"),check=MessageDigest.getInstance("SHA-256");
             try(FileInputStream in=new FileInputStream(source);OutputStream out=getContext().getContentResolver().openOutputStream(uri,"w")){
                 if(out==null)throw new IllegalStateException("Cannot open destination");
-                byte[] buffer=new byte[65536];int n;long copied=0,expected=source.length();
-                while((n=in.read(buffer))!=-1){if(!sessionValid())throw new IllegalStateException("Session expired");out.write(buffer,0,n);copied+=n;}
+                byte[] buffer=new byte[65536];int n;long copied=0;
+                while((n=in.read(buffer))!=-1){if(!sessionValid())throw new IllegalStateException("Session expired");out.write(buffer,0,n);digest.update(buffer,0,n);copied+=n;}
                 out.flush();if(copied!=expected)throw new IllegalStateException("Incomplete copy");
+            }
+            try(java.io.InputStream in=getContext().getContentResolver().openInputStream(uri)){
+                if(in==null)throw new IllegalStateException("Cannot verify destination");
+                byte[] buffer=new byte[65536];int n;long read=0;
+                while((n=in.read(buffer))!=-1){if(!sessionValid())throw new IllegalStateException("Session expired");check.update(buffer,0,n);read+=n;if(read>expected)throw new IllegalStateException("Unexpected destination size");}
+                if(read!=expected||!MessageDigest.isEqual(digest.digest(),check.digest())||!sessionValid())throw new IllegalStateException("Backup verification failed");
             }
             success=true;
         }catch(Exception ex){/* Report a generic failure; do not log financial data or destination paths. */}
