@@ -534,3 +534,31 @@ test('consolidated report snapshot, PDF rows and Excel numeric totals agree and 
  assert.throws(()=>makeConsolidatedReport(root,{...selection,dateFrom:'2026-11-28',dateTo:'2026-11-27'}),/بازه/);
  const filtered=makeConsolidatedReport(root,{...selection,dateFrom:'2026-11-28'},new Date(d));assert.equal(filtered.count,0);
 });
+
+
+test('v3 multi-ledger backup preserves archived identities, recovery attachments, and excludes AI config and replay tokens',async()=>{
+ const {migrateSingleLedger,createLedger,editLedgerProfile,DEFAULT_LEDGER_ID}=await import('./multiLedger');
+ const {emptyLedger}=await import('./ledgerDomain');const {digestBytes,encodeBytes}=await import('./attachments');
+ const {writeMultiLedgerBackup,readMultiLedgerBackup,previewMultiLedgerBackup,isMultiLedgerBackup}=await import('./multiLedgerBackup');
+ const {isStreamBackup,readStreamBackup}=await import('./streamBackup');
+ const d='2026-11-27T00:00:00Z',pass='synthetic password 123';
+ let root=createLedger(migrateSingleLedger({ledger:emptyLedger(),draft:null},d),'Jam','#123456',d,'jam');
+ const raw=new Uint8Array([37,80,68,70,45,1,2]),id=await digestBytes(raw),data=encodeBytes(raw);
+ const doc={...expense,id:'same',createdAt:d,approvedAt:d,attachmentId:id,attachmentMime:'application/pdf' as const};
+ root.workspaces[0].state.ledger.expenses=[doc];
+ root.workspaces[1].state.ledger.expenses=[{...doc,title:'Jam expense'}];
+ root.workspaces[0].state.recoveries=[{id:'checkpoint',createdAt:d,ledger:structuredClone(root.workspaces[0].state.ledger),draft:null}];
+ root.workspaces[0].state.lastApproval={id:'replay',records:[doc]};
+ root=editLedgerProfile(root,'jam',{archived:true});
+ const chunks:Uint8Array<ArrayBuffer>[]=[];let reads=0;
+ await writeMultiLedgerBackup(root,pass,{async get(key){assert.equal(key,id);reads++;return data;}},async b=>{chunks.push(b);});
+ const file=new Blob(chunks);assert.equal(reads,1);assert.equal(await isMultiLedgerBackup(file),true);assert.equal(await isStreamBackup(file),false);
+ const preview=await previewMultiLedgerBackup(file,pass);assert.equal(preview.attachmentCount,1);
+ assert.deepEqual(preview.manifest.workspaces.map(w=>w.profile.id),[DEFAULT_LEDGER_ID,'jam']);assert.equal(preview.manifest.workspaces[1].profile.archived,true);
+ assert.equal(preview.manifest.workspaces[0].state.ledger.aiConfig,undefined);assert.equal(preview.manifest.workspaces[0].state.recoveries?.[0].ledger.aiConfig,undefined);assert.equal(preview.manifest.workspaces[0].state.lastApproval,undefined);
+ let writes=0;const store={async put(key:string,value:string){assert.equal(key,id);assert.equal(value,data);writes++;}};
+ const restored=await readMultiLedgerBackup(file,pass,store);assert.deepEqual(restored,preview.manifest);assert.equal(writes,1);
+ await assert.rejects(()=>readMultiLedgerBackup(file,'wrong password',store));await assert.rejects(()=>readStreamBackup(file,pass,store));
+ await assert.rejects(()=>readMultiLedgerBackup(file.slice(0,file.size-1),pass,store));
+ await assert.rejects(()=>readMultiLedgerBackup(new Blob([...chunks,new Uint8Array([1])]),pass,store));
+});
