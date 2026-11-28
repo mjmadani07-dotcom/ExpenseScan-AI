@@ -344,7 +344,7 @@ public class LedgerWorkflowTest {
         nav(app,"داشبورد");click(app,"تغییر دفتر");text(app,"دفاتر مالی");
     }
     private byte[] readReportFile(String extension)throws Exception{
-        if(!"pdf".equals(extension)&&!"xlsx".equals(extension))throw new IllegalArgumentException("extension");
+        if(!"pdf".equals(extension)&&!"xlsx".equals(extension)&&!"json".equals(extension))throw new IllegalArgumentException("extension");
         // Verify the actual published MediaStore download as its owning app.
         // Shell/FUSE visibility is not the contract of Android scoped storage.
         android.content.Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
@@ -356,10 +356,10 @@ public class LedgerWorkflowTest {
         String pending=android.provider.MediaStore.MediaColumns.IS_PENDING;
         String size=android.provider.MediaStore.MediaColumns.SIZE;
         String mime=android.provider.MediaStore.MediaColumns.MIME_TYPE;
-        String expectedMime="pdf".equals(extension)?"application/pdf":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        String expectedMime="pdf".equals(extension)?"application/pdf":"json".equals(extension)?"application/json":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
         String relativePath=android.os.Environment.DIRECTORY_DOWNLOADS+"/HesabYar/";
         String selection=name+" LIKE ? AND "+path+" = ? AND "+pending+" = ?";
-        String[] args={"hesabyar-consolidated-%."+extension,relativePath,"0"};
+        String[] args={("json".equals(extension)?"hesabyar-ledger-":"hesabyar-consolidated-")+"%."+extension,relativePath,"0"};
         long deadline=android.os.SystemClock.elapsedRealtime()+10000;
         do{
             try(android.database.Cursor cursor=resolver.query(collection,new String[]{id,name,path,pending,size,mime},selection,args,null)){
@@ -394,7 +394,8 @@ public class LedgerWorkflowTest {
             openCatalogLedger(app,"دفتر کرج");
             click(app,"تومان");nav(app,"ثبت سند");text(app,"ثبت سند در دفتر:");
             click(app,"ثبت دستی (آفلاین)");text(app,"بررسی و تایید نهایی پیش‌نویس");
-            field(app,"input[id^='title-']","Karaj E2E");field(app,"input[id^='vendor-']","Synthetic vendor");field(app,"input[id^='amount-']","34567");
+            field(app,"input[id^='title-']","Karaj E2E");field(app,"input[id^='vendor-']","Synthetic vendor");field(app,"input[id^='amount-']","۳۴۵۶۷");
+            waitFor(app,"document.querySelector(\"input[id^='amount-']\").value==='34,567'","Grouped money input missing");
             waitFor(app,"document.querySelector('form button[type=submit]:not(:disabled)')","Approval unavailable");
             eval(app,"document.querySelector('form button[type=submit]').click()");
             waitFor(app,"!document.querySelector('input[id^=\"title-\"]')","Approval did not complete");
@@ -463,6 +464,16 @@ public class LedgerWorkflowTest {
             assertTrue(all.contains("دفتر کرج")&&all.contains("دفتر جم"));assertFalse(all.contains("دفتر اولیه"));
             click(app,"دفاتر مالی");openCatalogLedger(app,"دفتر کرج");nav(app,"هزینه‌ها");text(app,"Karaj E2E");
             waitFor(app,"!document.body.innerText.includes('Jam E2E')","Reporting changed the write scope");
+            nav(app,"تنظیمات");
+            String dataGroup="document.querySelector('button[aria-controls=settings-data]')";
+            waitFor(app,dataGroup,"JSON settings missing");eval(app,"("+dataGroup+").click()");
+            String exportJson="Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes('خروجی کامل JSON')&&!b.disabled)";
+            waitFor(app,exportJson,"JSON export unavailable");eval(app,"("+exportJson+").click()");
+            text(app,"فایل JSON ذخیره شد.");
+            JSONObject json=new JSONObject(new String(readReportFile("json"),StandardCharsets.UTF_8));
+            JSONArray exported=json.getJSONArray("expenses");assertEquals(1,exported.length());
+            assertEquals("Karaj E2E",exported.getJSONObject(0).getString("title"));
+            assertEquals(34567,exported.getJSONObject(0).getInt("amount"));
             click(app,"قفل");text(app,"حساب‌یار قفل است");
         }
     }

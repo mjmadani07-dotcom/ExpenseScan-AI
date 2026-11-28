@@ -48,15 +48,16 @@ export const JsonSyncPanel: React.FC<JsonSyncPanelProps> = ({
   const [resultStats, setResultStats] = useState<JsonImportStats | null>(null);
 
   const [isExporting,setIsExporting]=useState(false);
+  const [exportNotice,setExportNotice]=useState('');
   const handleExportJson = async () => {
-    setIsExporting(true);setErrorMsg(null);try {
+    setIsExporting(true);setErrorMsg(null);setExportNotice('');try {
     const payload = JSON.stringify(
       { expenses:expenses.map(({attachmentId:_id,attachmentMime:_mime,...rest})=>rest), ...(categories ? { categories } : {}), budgets, rates },
       null,
       2
     );
     const jDate = formatJalaliDate(businessDateIso()).replace(/\//g, '-');
-    if(isAndroidRuntime()){await nativeExportFile('hesabyar-ledger-'+jDate+'.json',new TextEncoder().encode(payload),'application/json');return;}
+    if(isAndroidRuntime()){await nativeExportFile('hesabyar-ledger-'+jDate+'-'+Date.now()+'.json',new TextEncoder().encode(payload),'application/json');setExportNotice('فایل JSON ذخیره شد. در اندروید ۱۰ به بالا پوشه Downloads/HesabYar را بررسی کنید.');return;}
     const blob = new Blob([payload], { type: 'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -123,7 +124,7 @@ export const JsonSyncPanel: React.FC<JsonSyncPanelProps> = ({
             خروجی و ورود فایل JSON (همگام‌سازی بین دستگاه‌ها)
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            اسناد مالی را ادغام یا جایگزین کنید. JSON فایل اصلی پیوست‌ها را ندارد؛ برای انتقال کامل از پشتیبان رمزگذاری‌شده استفاده کنید.
+            اسناد مالی را ادغام یا جایگزین کنید. JSON بدون رمزگذاری است و فایل اصلی پیوست‌ها را ندارد؛ برای انتقال کامل از پشتیبان رمزگذاری‌شده استفاده کنید.
           </p>
         </div>
 
@@ -150,6 +151,7 @@ export const JsonSyncPanel: React.FC<JsonSyncPanelProps> = ({
         }}
       />
 
+      {exportNotice && <p role="status" className="rounded-xl bg-teal-50 p-3 text-xs text-teal-800">{exportNotice}</p>}
       {errorMsg && (
         <div
           role="alert"

@@ -1,3 +1,4 @@
+import { MoneyInput } from './MoneyInput';
 import React, { useState } from 'react';
 import {
   AlertTriangle,
@@ -241,14 +242,13 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
           <label htmlFor={`edit-amount-${expense.id}`} className="block text-xs font-semibold text-slate-700 mb-1">
             مبلغ کل ({CURRENCY_LABELS[getEntryCurrency(currency, displayUnit)]}) *
           </label>
-          <input
+          <MoneyInput
             id={`edit-amount-${expense.id}`}
-            type="number"
             min={0}
             step="any"
             required
             value={toEntryAmount(amount, currency, displayUnit)}
-            onChange={(e) => setAmount(fromEntryAmount(Number(e.target.value) || 0, currency, displayUnit))}
+            onValueChange={(value) => setAmount(fromEntryAmount(value || 0, currency, displayUnit))}
             className="w-full min-h-[40px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
           />
           {isForeign && (
@@ -281,14 +281,13 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
             <label htmlFor={`edit-rate-${expense.id}`} className="block text-xs font-semibold text-slate-700 mb-1">
               نرخ تسعیر ثبت‌شده این سند ({CURRENCY_LABELS[displayUnit]}) *
             </label>
-            <input
+            <MoneyInput
               id={`edit-rate-${expense.id}`}
-              type="number"
               min={1}
               step={100}
               required
               value={toEntryAmount(effectiveRate ?? 0, 'IRT', displayUnit)}
-              onChange={(e) => setExchangeRateToToman(fromEntryAmount(Number(e.target.value) || 0, 'IRT', displayUnit))}
+              onValueChange={(value) => setExchangeRateToToman(fromEntryAmount(value || 0, 'IRT', displayUnit))}
               className="w-full min-h-[40px] rounded-xl border border-teal-300 bg-teal-50/40 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
             />
           </div>
@@ -298,13 +297,12 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
           <label htmlFor={`edit-tax-${expense.id}`} className="block text-xs font-semibold text-slate-700 mb-1">
             مالیات ارزش افزوده ({CURRENCY_LABELS[getEntryCurrency(currency, displayUnit)]})
           </label>
-          <input
+          <MoneyInput
             id={`edit-tax-${expense.id}`}
-            type="number"
             min={0}
             step="any"
             value={toEntryAmount(taxAmount, currency, displayUnit)}
-            onChange={(e) => setTaxAmount(fromEntryAmount(Number(e.target.value) || 0, currency, displayUnit))}
+            onValueChange={(value) => setTaxAmount(fromEntryAmount(value || 0, currency, displayUnit))}
             className="w-full min-h-[40px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
           />
         </div>
@@ -313,13 +311,12 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
           <label htmlFor={`edit-discount-${expense.id}`} className="block text-xs font-semibold text-slate-700 mb-1">
             تخفیف ({CURRENCY_LABELS[getEntryCurrency(currency, displayUnit)]})
           </label>
-          <input
+          <MoneyInput
             id={`edit-discount-${expense.id}`}
-            type="number"
             min={0}
             step="any"
             value={toEntryAmount(discountAmount, currency, displayUnit)}
-            onChange={(e) => setDiscountAmount(fromEntryAmount(Number(e.target.value) || 0, currency, displayUnit))}
+            onValueChange={(value) => setDiscountAmount(fromEntryAmount(value || 0, currency, displayUnit))}
             className="w-full min-h-[40px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
           />
         </div>
@@ -592,14 +589,13 @@ export const ExpenseEditForm: React.FC<ExpenseEditFormProps> = ({
               }}
               className="col-span-4 sm:col-span-2 min-h-[36px] rounded-lg border border-slate-200 bg-white px-2 text-xs font-mono-num text-slate-900"
             />
-            <input
-              type="number"
+            <MoneyInput
               aria-label={`فی قلم ${idx + 1} (${CURRENCY_LABELS[getEntryCurrency(currency, displayUnit)]})`}
               min={0}
               step="any"
               value={toEntryAmount(li.unitPrice, currency, displayUnit)}
-              onChange={(e) => {
-                const up = fromEntryAmount(Number(e.target.value) || 0, currency, displayUnit);
+              onValueChange={(value) => {
+                const up = fromEntryAmount(value || 0, currency, displayUnit);
                 const next = [...lineItems];
                 next[idx] = { ...li, unitPrice: up, totalPrice: li.quantity * up };
                 setLineItems(next);

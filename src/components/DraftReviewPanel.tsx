@@ -1,3 +1,4 @@
+import { MoneyInput } from './MoneyInput';
 import React, { useMemo, useState } from 'react';
 import { AttachmentViewer } from './AttachmentViewer';
 import {
@@ -450,15 +451,14 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                     >
                       مبلغ کل ({CURRENCY_LABELS[getEntryCurrency(draft.currency, displayUnit)]}) *
                     </label>
-                    <input
+                    <MoneyInput
                       id={`amount-${draft.tempId}`}
-                      type="number"
                       min={0}
                       step="any"
                       required
                       value={toEntryAmount(draft.amount, draft.currency, displayUnit)}
-                      onChange={(e) =>
-                        updateDraft(draft.tempId, { amount: fromEntryAmount(Number(e.target.value) || 0, draft.currency, displayUnit) })
+                      onValueChange={(value) =>
+                        updateDraft(draft.tempId, { amount: fromEntryAmount(value || 0, draft.currency, displayUnit) })
                       }
                       className="w-full min-h-[42px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
                     />
@@ -500,16 +500,15 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                       >
                         نرخ تسعیر این سند ({CURRENCY_LABELS[displayUnit]}) *
                       </label>
-                      <input
+                      <MoneyInput
                         id={`rate-${draft.tempId}`}
-                        type="number"
                         min={1}
                         step={100}
                         required
                         value={toEntryAmount(effectiveRate ?? 0, 'IRT', displayUnit)}
-                        onChange={(e) =>
+                        onValueChange={(value) =>
                           updateDraft(draft.tempId, {
-                            exchangeRateToToman: fromEntryAmount(Number(e.target.value) || 0, 'IRT', displayUnit),
+                            exchangeRateToToman: fromEntryAmount(value || 0, 'IRT', displayUnit),
                           })
                         }
                         className="w-full min-h-[42px] rounded-xl border border-teal-300 bg-teal-50/40 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
@@ -678,14 +677,13 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                     >
                       مالیات ارزش افزوده ({CURRENCY_LABELS[getEntryCurrency(draft.currency, displayUnit)]})
                     </label>
-                    <input
+                    <MoneyInput
                       id={`tax-${draft.tempId}`}
-                      type="number"
                       min={0}
                       step="any"
                       value={toEntryAmount(draft.taxAmount, draft.currency, displayUnit)}
-                      onChange={(e) =>
-                        updateDraft(draft.tempId, { taxAmount: fromEntryAmount(Number(e.target.value) || 0, draft.currency, displayUnit) })
+                      onValueChange={(value) =>
+                        updateDraft(draft.tempId, { taxAmount: fromEntryAmount(value || 0, draft.currency, displayUnit) })
                       }
                       className="w-full min-h-[42px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
                     />
@@ -871,14 +869,13 @@ export const DraftReviewPanel: React.FC<DraftReviewPanelProps> = ({
                             }}
                             className="col-span-4 sm:col-span-2 min-h-[36px] rounded-lg border border-slate-200 bg-white px-2 text-xs font-mono-num text-slate-900"
                           />
-                          <input
-                            type="number"
+                          <MoneyInput
                             aria-label={`فی قلم ${liIdx + 1} (${CURRENCY_LABELS[getEntryCurrency(draft.currency, displayUnit)]})`}
                             min={0}
                             step="any"
                             value={toEntryAmount(li.unitPrice, draft.currency, displayUnit)}
-                            onChange={(e) => {
-                              const up = fromEntryAmount(Number(e.target.value) || 0, draft.currency, displayUnit);
+                            onValueChange={(value) => {
+                              const up = fromEntryAmount(value || 0, draft.currency, displayUnit);
                               const next = [...draft.lineItems];
                               next[liIdx] = {
                                 ...li,

@@ -868,3 +868,13 @@ test('JSON import rejects invalid financial fields without coercion and preserve
   assert.throws(()=>parseAndValidateLedgerImport([{...SAMPLE_EXPENSES[1],exchangeRateToToman:undefined}]),/نرخ تاریخی/);
   assert.deepEqual(parseAndValidateLedgerImport({expenses:[exp],budgets:[]}).budgets,[]);
 });
+
+
+test('money inputs preserve decimals and normalize Persian and Arabic digits without changing amounts',async()=>{
+ const {normalizeMoneyInput,groupMoneyInput,moneyInputValue}=await import('./moneyInput');
+ assert.equal(normalizeMoneyInput('۱٬۲۳۴٬۵۶۷٫۸۰'),'1234567.80');
+ assert.equal(groupMoneyInput('1234567.80'),'1,234,567.80');
+ assert.equal(moneyInputValue('1234567.80'),1234567.8);
+ assert.equal(normalizeMoneyInput('١٢٣٤'),'1234');assert.equal(normalizeMoneyInput('12x'),null);
+ assert.equal(groupMoneyInput('1234.'),'1,234.');assert.equal(normalizeMoneyInput(''), '');
+});

@@ -1,3 +1,4 @@
+import { MoneyInput } from './MoneyInput';
 import { addCalendarDays, businessDateIso } from '../utils/jalali';
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp, Plus, Split, Trash2 } from 'lucide-react';
@@ -375,14 +376,13 @@ export const PaymentTranchesEditor: React.FC<PaymentTranchesEditorProps> = ({
                     >
                       مبلغ این بخش ({CURRENCY_LABELS[getEntryCurrency(currency, displayUnit)]})
                     </label>
-                    <input
+                    <MoneyInput
                       id={`${idPrefix}-tr-amount-${tr.id}`}
-                      type="number"
                       min={0}
                       step="any"
                       value={toEntryAmount(tr.amount, currency, displayUnit)}
-                      onChange={(e) =>
-                        updateTranche(tr.id, { amount: fromEntryAmount(Number(e.target.value) || 0, currency, displayUnit) })
+                      onValueChange={(value) =>
+                        updateTranche(tr.id, { amount: fromEntryAmount(value || 0, currency, displayUnit) })
                       }
                       className="w-full min-h-[38px] rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
                     />

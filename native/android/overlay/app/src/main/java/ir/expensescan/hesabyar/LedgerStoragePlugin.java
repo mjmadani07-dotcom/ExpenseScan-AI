@@ -48,15 +48,15 @@ public class LedgerStoragePlugin extends Plugin {
     private static final String PREFIX = "gcm1:";
     private static final int MAX_PAYLOAD = 32 * 1024 * 1024;
 
-    private static final long IDLE_MS=5*60*1000L;
-    private static final long BACKGROUND_MS=30*1000L;
+    private static final long IDLE_MS=15*60*1000L;
+    private static final long BACKGROUND_MS=5*60*1000L;
     private long lastActivity=0, stoppedAt=0;
     private boolean unlocked=false, foreground=true, authPending=false, authCancelled=false;
 
     private KeyguardManager keyguard(){return (KeyguardManager)getContext().getSystemService(android.content.Context.KEYGUARD_SERVICE);}
     private synchronized boolean sessionValid(){
         long now=SystemClock.elapsedRealtime();
-        if(!unlocked || !keyguard().isDeviceSecure() || now-lastActivity>=IDLE_MS || (stoppedAt!=0 && now-stoppedAt>=BACKGROUND_MS)) unlocked=false;
+        if(!unlocked || !keyguard().isDeviceSecure() || keyguard().isDeviceLocked() || now-lastActivity>=IDLE_MS || (stoppedAt!=0 && now-stoppedAt>=BACKGROUND_MS)) unlocked=false;
         return unlocked;
     }
     private synchronized boolean requireSession(PluginCall call){
@@ -72,7 +72,7 @@ public class LedgerStoragePlugin extends Plugin {
     }
     @PluginMethod public synchronized void lockApp(PluginCall call){unlocked=false;if(authPending)authCancelled=true;call.resolve();}
     @Override protected synchronized void handleOnStop(){foreground=false;stoppedAt=SystemClock.elapsedRealtime();}
-    @Override protected synchronized void handleOnResume(){sessionValid();foreground=true;stoppedAt=0;}
+    @Override protected synchronized void handleOnResume(){boolean returning=stoppedAt!=0;if(sessionValid()&&returning)lastActivity=SystemClock.elapsedRealtime();foreground=true;stoppedAt=0;}
     @PluginMethod public synchronized void unlockBiometric(PluginCall call){
         if(authPending){call.reject("Authentication already in progress");return;}
         if(!keyguard().isDeviceSecure()||BiometricManager.from(getContext()).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)!=BiometricManager.BIOMETRIC_SUCCESS){
@@ -559,16 +559,18 @@ public class LedgerStoragePlugin extends Plugin {
         String data=call.getString("data"), name=call.getString("name"), mime=backup?"application/octet-stream":call.getString("mime");
         if(data==null||data.length()>64*1024*1024||name==null||!name.matches("[A-Za-z0-9._-]{1,100}")||mime==null||(!backup&&!mime.equals("application/json")&&!mime.equals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")&&!mime.matches("application/pdf|image/(jpeg|png|webp|gif)|text/(plain|csv)"))){call.reject("Invalid export file");return;}
         if(backup&&!name.endsWith(".esbackup")){call.reject("Invalid backup extension");return;}
-        if(!backup&&android.os.Build.VERSION.SDK_INT>=29&&mime.equals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")){
-            if(!name.endsWith(".xlsx")){call.reject("Invalid Excel extension");return;}
+        if(!backup&&android.os.Build.VERSION.SDK_INT>=29&&(mime.equals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")||mime.equals("application/json"))){
+            final boolean json=mime.equals("application/json");
+            if(!name.endsWith(json?".json":".xlsx")){call.reject("Invalid export extension");return;}
             try{new Thread(()->{
                 try{
                     byte[] bytes=Base64.decode(data,Base64.NO_WRAP);
-                    if(bytes.length<4||bytes[0]!='P'||bytes[1]!='K')throw new IllegalArgumentException("Invalid workbook");
+                    if(json){new JSONObject(new String(bytes,StandardCharsets.UTF_8));}
+                    else if(bytes.length<4||bytes[0]!='P'||bytes[1]!='K')throw new IllegalArgumentException("Invalid workbook");
                     DownloadPublisher.publish(getContext().getContentResolver(),name,mime,()->new java.io.ByteArrayInputStream(bytes),bytes.length,()->sessionValid()&&foregroundForExport());
                     call.resolve();
-                }catch(Exception ex){call.reject("ذخیره Excel ناموفق بود؛ فضای آزاد و قفل برنامه را بررسی کنید.");}
-            },"ExpenseScan-excel-download").start();}catch(Exception ex){call.reject("Cannot start Excel export");}
+                }catch(Exception ex){call.reject("ذخیره "+(json?"JSON":"Excel")+" ناموفق بود؛ فضای آزاد و قفل برنامه را بررسی کنید.");}
+            },"ExpenseScan-file-download").start();}catch(Exception ex){call.reject("Cannot start file export");}
             return;
         }
         Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);

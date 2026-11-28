@@ -1,3 +1,4 @@
+import { MoneyInput } from './MoneyInput';
 import { useWorkspaceBusy } from './WorkspaceActivity';
 import { testAiConnection } from '../utils/clientAiExtract';
 import { isAndroidRuntime } from '../storage/androidSnapshotStore';
@@ -806,13 +807,12 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
             <label htmlFor="rate-usd" className="block text-xs font-semibold text-slate-700 mb-1.5">
               نرخ هر ۱ دلار آمریکا ({CURRENCY_LABELS[displayUnit]})
             </label>
-            <input
+            <MoneyInput
               id="rate-usd"
-              type="number"
               min={1000}
               value={toEntryAmount(localRates.USD, 'IRT', displayUnit)}
-              onChange={(e) =>
-                setLocalRates((r) => ({ ...r, USD: fromEntryAmount(Number(e.target.value) || 0, 'IRT', displayUnit) }))
+              onValueChange={(value) =>
+                setLocalRates((r) => ({ ...r, USD: fromEntryAmount(value || 0, 'IRT', displayUnit) }))
               }
               className="w-full min-h-[42px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
             />
@@ -821,13 +821,12 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
             <label htmlFor="rate-eur" className="block text-xs font-semibold text-slate-700 mb-1.5">
               نرخ هر ۱ یورو ({CURRENCY_LABELS[displayUnit]})
             </label>
-            <input
+            <MoneyInput
               id="rate-eur"
-              type="number"
               min={1000}
               value={toEntryAmount(localRates.EUR, 'IRT', displayUnit)}
-              onChange={(e) =>
-                setLocalRates((r) => ({ ...r, EUR: fromEntryAmount(Number(e.target.value) || 0, 'IRT', displayUnit) }))
+              onValueChange={(value) =>
+                setLocalRates((r) => ({ ...r, EUR: fromEntryAmount(value || 0, 'IRT', displayUnit) }))
               }
               className="w-full min-h-[42px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
             />
@@ -916,13 +915,12 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
               <label htmlFor="new-category-budget" className="block text-[11px] font-semibold text-slate-700 mb-1">
                 بودجه ماهانه ({CURRENCY_LABELS[displayUnit]})
               </label>
-              <input
+              <MoneyInput
                 id="new-category-budget"
-                type="number"
                 min={0}
                 step={500000}
                 value={toEntryAmount(newCatBudget, 'IRT', displayUnit)}
-                onChange={(e) => setNewCatBudget(fromEntryAmount(Number(e.target.value) || 0, 'IRT', displayUnit))}
+                onValueChange={(value) => setNewCatBudget(fromEntryAmount(value || 0, 'IRT', displayUnit))}
                 className="w-full min-h-[40px] rounded-xl border border-slate-200 bg-white px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
               />
             </div>
@@ -1155,13 +1153,12 @@ export const SettingsBudgets: React.FC<SettingsBudgetsProps> = ({
                         >
                           سقف بودجه ماهانه ({CURRENCY_LABELS[displayUnit]})
                         </label>
-                        <input
+                        <MoneyInput
                           id={`budget-${cat.id}`}
-                          type="number"
                           min={0}
                           step={500000}
                           value={toEntryAmount(val, 'IRT', displayUnit)}
-                          onChange={(e) => handleBudgetChange(cat.id, fromEntryAmount(Number(e.target.value) || 0, 'IRT', displayUnit))}
+                          onValueChange={(value) => handleBudgetChange(cat.id, fromEntryAmount(value || 0, 'IRT', displayUnit))}
                           className="w-full min-h-[40px] rounded-xl border border-slate-200 px-3 text-sm font-mono-num text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
                         />
                       </div>
