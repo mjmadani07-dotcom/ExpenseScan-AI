@@ -4,6 +4,8 @@ import { canonicalJson } from './ledgerRows';
 import {makeConsolidatedReport,type ReportSelection,type ConsolidatedReport} from '../utils/consolidatedReport';
 import type { AttachmentStore } from './attachments';
 import type { DraftSession } from './ledgerRepository';
+import {writeMultiLedgerBackup,readMultiLedgerBackup,previewMultiLedgerBackup,isMultiLedgerBackup} from './multiLedgerBackup';
+import type {ByteSink,Progress} from './streamBackup';
 
 export interface LedgerCatalogItem { profile:LedgerProfile; count:number; hasDraft:boolean; }
 export interface OpenWorkspace { profile:LedgerProfile; repository:LocalLedgerRepository; }
@@ -26,6 +28,33 @@ export class MultiLedgerSession {
  private assertCatalog(){this.assertOpen();if(this.active)throw new Error('ابتدا از دفتر فعال خارج شوید.');}
  async report(selection:ReportSelection){return this.exclusive(async()=>{this.assertCatalog();return makeConsolidatedReport((await this.store.read()).state,selection);});}
  async exportReport<T>(report:ConsolidatedReport,write:(snapshot:ConsolidatedReport)=>Promise<T>){return this.exclusive(async()=>{this.assertCatalog();return write(structuredClone(report));});}
+ async writeBackup(password:string,sink:ByteSink,progress?:Progress,signal?:AbortSignal){
+  return this.exclusive(async()=>{this.assertCatalog();return writeMultiLedgerBackup((await this.store.read()).state,password,this.attachments,sink,progress,signal);});
+ }
+ async previewBackup(file:Blob,password:string,signal?:AbortSignal){
+  return this.exclusive(async()=>{
+   this.assertCatalog();
+   if(!await isMultiLedgerBackup(file))throw new Error('برای جایگزینی همه دفاتر فقط فایل پشتیبان چنددفتره مجاز است؛ پشتیبان تک‌دفتره باید جداگانه وارد شود.');
+   const preview=await previewMultiLedgerBackup(file,password,signal);
+   return {...preview,revision:(await this.store.read()).revision};
+  });
+ }
+ // Confirmation UI must show preview and require a separately published safety backup.
+ // The callback must resolve only after verified durable publication.
+ async restoreBackup(file:Blob,password:string,preview:Awaited<ReturnType<MultiLedgerSession['previewBackup']>>,saveSafetyBackup:(write:(sink:ByteSink)=>Promise<number>)=>Promise<void>,safetyPassword:string,progress?:Progress,signal?:AbortSignal){
+  return this.exclusive(async()=>{
+   this.assertCatalog();if(!this.store.restoreAll)throw new Error('بازیابی کامل در این محیط پشتیبانی نمی‌شود.');
+   const before=await this.store.read();
+   if(before.revision!==preview.revision)throw new Error('دفاتر تغییر کرده‌اند؛ پیش‌نمایش را دوباره انجام دهید.');
+   const restored=await readMultiLedgerBackup(file,password,this.attachments,progress,signal);
+   if(canonicalJson(restored)!==canonicalJson(preview.manifest))throw new Error('فایل با پیش‌نمایش تأییدشده یکسان نیست.');
+   this.assertOpen();if(signal?.aborted)throw new Error('بازیابی لغو شد.');
+   await saveSafetyBackup(sink=>writeMultiLedgerBackup(before.state,safetyPassword,this.attachments,sink,undefined,signal));
+   this.assertOpen();if(signal?.aborted)throw new Error('بازیابی لغو شد.');
+   if(!await this.store.restoreAll(before.revision,restored))throw new Error('دفاتر هم‌زمان تغییر کردند؛ بازیابی انجام نشد.');
+   return describeCatalog(restored);
+  });
+ }
  async catalog(){return this.exclusive(async()=>{this.assertCatalog();return describeCatalog((await this.store.read()).state);});}
  async create(name:string,color:string){return this.exclusive(async()=>{this.assertCatalog();return describeCatalog(await changeCatalog(this.store,s=>createLedger(s,name,color)));});}
  async edit(id:string,patch:Partial<Pick<LedgerProfile,'name'|'color'|'archived'>>){return this.exclusive(async()=>{this.assertCatalog();return describeCatalog(await changeCatalog(this.store,s=>editLedgerProfile(s,id,patch)));});}

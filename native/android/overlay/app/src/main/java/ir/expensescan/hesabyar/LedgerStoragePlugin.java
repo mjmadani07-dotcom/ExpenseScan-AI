@@ -316,6 +316,31 @@ public class LedgerStoragePlugin extends Plugin {
         }catch(Exception ex){call.reject("Multi-ledger commit failed; previous committed data was preserved.");}
     }
 
+    @PluginMethod public synchronized void restoreMulti(PluginCall call){
+        if(!requireSession(call))return;
+        if(!Boolean.TRUE.equals(call.getBoolean("confirmed"))){call.reject("Explicit full restore confirmation required");return;}
+        try(SQLiteDatabase db=open()){
+            long revision=multiRevision(call);String raw=call.getString("workspaces");
+            if(raw==null||raw.length()>64L*1024*1024)throw new IllegalArgumentException("Invalid restore payload");
+            JSONArray workspaces=new JSONArray(raw);boolean committed=false;
+            db.beginTransaction();
+            try{
+                if(db.getVersion()!=MultiLedgerTables.VERSION)throw new IllegalStateException("Invalid schema");
+                if(LedgerTables.revision(db,"ledger_revision")==revision){
+                    // Validate actual encrypted bytes, not merely attachment file presence.
+                    for(String id:MultiLedgerTables.attachments(workspaces)){
+                        if(!sessionValid())throw new IllegalStateException("Session expired");
+                        readAttachmentData(attachmentFile(id),id);
+                    }
+                    if(!sessionValid())throw new IllegalStateException("Session expired");
+                    committed=MultiLedgerTables.restore(db,revision,workspaces,rowCodec());
+                    if(committed){if(!sessionValid())throw new IllegalStateException("Session expired");db.setTransactionSuccessful();}
+                }
+            }finally{db.endTransaction();}
+            JSObject result=new JSObject();result.put("committed",committed);call.resolve(result);
+        }catch(Exception ex){call.reject("Full restore failed; previous committed data was preserved.");}
+    }
+
     @PluginMethod public synchronized void loadKeys(PluginCall call) {
         if(!requireSession(call))return;
         try {
@@ -481,8 +506,11 @@ public class LedgerStoragePlugin extends Plugin {
     @PluginMethod public synchronized void finishStreamBackup(PluginCall call){
         if(!requireSession(call))return;
         String name=call.getString("name");
-        if(!matchesStage(call)||streamPicking||streamFile.length()<52||name==null||!name.matches("[A-Za-z0-9._-]{1,100}")||!name.endsWith(".esbackup2")){call.reject("Invalid staged backup");return;}
+        if(!matchesStage(call)||streamPicking||streamFile.length()<52||name==null||!name.matches("[A-Za-z0-9._-]{1,100}")||!(name.endsWith(".esbackup2")||name.endsWith(".esbackup3"))){call.reject("Invalid staged backup");return;}
         try{
+            byte[] magic=new byte[8];
+            try(FileInputStream in=new FileInputStream(streamFile)){if(in.read(magic)!=8)throw new IllegalStateException("Invalid backup header");}
+            if(!new String(magic,StandardCharsets.US_ASCII).equals(name.endsWith(".esbackup3")?"ESBACK3\n":"ESBACK2\n"))throw new IllegalArgumentException("Backup format mismatch");
             try(FileOutputStream out=new FileOutputStream(streamFile,true)){out.getFD().sync();}
             if(android.os.Build.VERSION.SDK_INT>=29){
                 final File source=streamFile;streamPicking=true;

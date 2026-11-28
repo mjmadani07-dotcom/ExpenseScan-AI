@@ -141,6 +141,40 @@ final class MultiLedgerTables {
         ContentValues v=new ContentValues();v.put("revision",revision+1);
         if(db.update("ledger_revision",v,"id=1 AND revision=?",new String[]{Long.toString(revision)})!=1)throw new IllegalStateException("Revision changed");
     }
+    // Dedicated full-catalog restore. Normal commits remain non-destructive.
+    // A caller MUST hold the transaction and validate/stage every attachment first.
+    static boolean restore(SQLiteDatabase db,long revision,JSONArray proposed,LedgerTables.Codec codec)throws Exception{
+        requireTransaction(db);
+        if(db.getVersion()!=VERSION)throw new IllegalStateException("Invalid schema");
+        if(LedgerTables.revision(db,"ledger_revision")!=revision)return false;
+        read(db,codec); // refuse to replace a catalog that cannot be authenticated
+        if(proposed.length()<1||proposed.length()>100)throw new IllegalArgumentException("Invalid restore catalog");
+        Set<String> ids=new HashSet<>(),names=new HashSet<>();boolean active=false;
+        for(int i=0;i<proposed.length();i++){
+            JSONObject w=proposed.getJSONObject(i),p=validateProfile(w.getJSONObject("profile"));
+            String name=java.text.Normalizer.normalize(p.getString("name"),java.text.Normalizer.Form.NFKC).replace('ي','ی').replace('ك','ک').trim().replaceAll("\\s+"," ").toLowerCase(java.util.Locale.ROOT);
+            if(!ids.add(p.getString("id"))||!names.add(name))throw new IllegalArgumentException("Duplicate workspace");
+            boolean archived=p.getBoolean("archived");active|=!archived;
+            JSONArray rows=w.getJSONArray("rows");validateRows(rows);
+            if(archived)for(int j=0;j<rows.length();j++)if("drafts".equals(rows.getJSONObject(j).getString("table")))throw new IllegalArgumentException("Archived draft");
+        }
+        if(!active)throw new IllegalArgumentException("No active ledger");
+        // Children first. Nothing outside this transaction is deleted.
+        for(int i=TABLES.length-1;i>=0;i--)db.delete(table(TABLES[i]),null,null);
+        db.delete("multi_profiles",null,null);
+        for(int i=0;i<proposed.length();i++){
+            JSONObject w=proposed.getJSONObject(i),p=w.getJSONObject("profile");
+            saveProfile(db,p,i,codec);replaceRows(db,p.getString("id"),new JSONArray(),w.getJSONArray("rows"),codec);
+        }
+        JSONArray actual=read(db,codec);
+        if(actual.length()!=proposed.length())throw new IllegalStateException("Restore catalog mismatch");
+        for(int i=0;i<actual.length();i++){
+            JSONObject a=actual.getJSONObject(i),b=proposed.getJSONObject(i);
+            if(!a.getJSONObject("profile").toString().equals(b.getJSONObject("profile").toString()))throw new IllegalStateException("Restore profile mismatch");
+            verify(a.getJSONArray("rows"),b.getJSONArray("rows"));
+        }
+        advance(db,revision);return true;
+    }
     static boolean commit(SQLiteDatabase db,long revision,JSONArray proposed,LedgerTables.Codec codec)throws Exception{
         requireTransaction(db);
         if(db.getVersion()!=VERSION)throw new IllegalStateException("Invalid schema");

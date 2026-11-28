@@ -14,6 +14,8 @@ export interface MultiLedgerStore {
  initialize():Promise<void>;
  read():Promise<{revision:number;state:MultiLedgerState}>;
  compareAndSwap(revision:number,state:MultiLedgerState):Promise<boolean>;
+ // Full replacement is a separate explicitly confirmed operation; no fallback to normal CAS.
+ restoreAll?(revision:number,state:MultiLedgerState):Promise<boolean>;
 }
 const invalid=():never=>{throw new Error('ساختار دفاتر مالی نامعتبر است؛ داده‌ها تغییر نکردند.');};
 const nameKey=(name:string)=>name.normalize('NFKC').replace(/ي/g,'ی').replace(/ك/g,'ک').trim().replace(/\s+/g,' ').toLowerCase();

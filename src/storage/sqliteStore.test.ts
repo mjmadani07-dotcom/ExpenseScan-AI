@@ -562,3 +562,21 @@ test('v3 multi-ledger backup preserves archived identities, recovery attachments
  await assert.rejects(()=>readMultiLedgerBackup(file.slice(0,file.size-1),pass,store));
  await assert.rejects(()=>readMultiLedgerBackup(new Blob([...chunks,new Uint8Array([1])]),pass,store));
 });
+
+
+test('full restore session requires matching preview and successful safety backup, and rejects stale revisions',async()=>{
+ const {MultiLedgerSession}=await import('./multiLedgerSession');const {migrateSingleLedger,createLedger,validateMultiLedger}=await import('./multiLedger');
+ const {emptyLedger}=await import('./ledgerDomain');const {writeMultiLedgerBackup}=await import('./multiLedgerBackup');
+ const date='2026-11-27T00:00:00Z',pass='synthetic password 123';
+ let state=createLedger(migrateSingleLedger({ledger:emptyLedger(),draft:null},date),'Existing','#123456',date,'existing'),revision=7,restores=0;
+ const replacement=createLedger(migrateSingleLedger({ledger:emptyLedger(),draft:null},date),'Restored','#654321',date,'restored');
+ const chunks:Uint8Array<ArrayBuffer>[]=[];await writeMultiLedgerBackup(replacement,pass,undefined,async b=>{chunks.push(b);});const file=new Blob(chunks);
+ const store={initialize:async()=>{},read:async()=>({revision,state:structuredClone(state)}),compareAndSwap:async()=>false,restoreAll:async(expected:number,next:typeof state)=>{if(expected!==revision)return false;state=validateMultiLedger(next);revision++;restores++;return true;}};
+ const s=new MultiLedgerSession(store),preview=await s.previewBackup(file,pass);
+ await assert.rejects(()=>s.restoreBackup(file,pass,preview,async()=>{throw Error('safety export failed');},pass),/safety export failed/);
+ assert.equal(restores,0);assert.equal(state.workspaces[1].profile.id,'existing');
+ revision++;await assert.rejects(()=>s.restoreBackup(file,pass,preview,async()=>{},pass),/پیش‌نمایش/);assert.equal(restores,0);
+ const nextPreview=await s.previewBackup(file,pass);let safetyBytes=0;
+ await s.restoreBackup(file,pass,nextPreview,async write=>{await write(async b=>{safetyBytes+=b.length;});},pass);
+ assert.ok(safetyBytes>52);assert.equal(restores,1);assert.equal(state.workspaces[1].profile.id,'restored');
+});

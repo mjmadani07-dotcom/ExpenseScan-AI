@@ -67,10 +67,28 @@ public class MultiLedgerDeviceTest {
                     try{MultiLedgerTables.readRows(db,"jam",codec);fail("Ciphertext transplant must fail");}catch(IllegalStateException expected){}
                 }finally{db.endTransaction();}
                 assertTrue(MultiLedgerTables.attachments(MultiLedgerTables.read(db,codec)).contains(hash));
+                JSONArray previous=MultiLedgerTables.read(db,codec);
+                JSONArray replacement=new JSONArray().put(new JSONObject().put("profile",profile("new","Restored")).put("rows",rows));
+                // Stale revision cannot replace anything.
+                db.beginTransaction();try{assertFalse(MultiLedgerTables.restore(db,8,replacement,codec));db.setTransactionSuccessful();}finally{db.endTransaction();}
+                // Broken child after destructive SQL must roll back the entire catalog.
+                JSONArray broken=new JSONArray().put(new JSONObject().put("profile",profile("broken","Broken")).put("rows",bad));
+                db.beginTransaction();try{try{MultiLedgerTables.restore(db,9,broken,codec);fail("Invalid restore FK must fail");}catch(android.database.sqlite.SQLiteException expected){}}finally{db.endTransaction();}
+                assertEquals(previous.toString(),MultiLedgerTables.read(db,codec).toString());
+                assertEquals(9,LedgerTables.revision(db,"ledger_revision"));
+                // An interrupted valid replacement must also roll back.
+                db.beginTransaction();try{assertTrue(MultiLedgerTables.restore(db,9,replacement,codec));}finally{db.endTransaction();}
+                assertEquals(previous.toString(),MultiLedgerTables.read(db,codec).toString());
+                // Explicit restore may replace catalog IDs and reduce its length.
+                db.beginTransaction();try{assertTrue(MultiLedgerTables.restore(db,9,replacement,codec));db.setTransactionSuccessful();}finally{db.endTransaction();}
+                assertEquals("new",MultiLedgerTables.read(db,codec).getJSONObject(0).getJSONObject("profile").getString("id"));
+                assertEquals(10,LedgerTables.revision(db,"ledger_revision"));
+                // Recover previous fixture to prove reverse replacement and restart.
+                db.beginTransaction();try{assertTrue(MultiLedgerTables.restore(db,10,previous,codec));db.setTransactionSuccessful();}finally{db.endTransaction();}
             }
             try(SQLiteDatabase db=ctx.openOrCreateDatabase(name,Context.MODE_PRIVATE,null)){
                 assertEquals(4,db.getVersion());assertEquals(2,MultiLedgerTables.read(db,codec).length());
-                assertEquals(9,LedgerTables.revision(db,"ledger_revision"));
+                assertEquals(11,LedgerTables.revision(db,"ledger_revision"));
             }
         }finally{ctx.deleteDatabase(name);if(ks.containsAlias(alias))ks.deleteEntry(alias);}
     }

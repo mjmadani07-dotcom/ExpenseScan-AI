@@ -13,6 +13,7 @@ interface NativeLedgerBridge {
   migrateMulti(options:{revision:string;profile:string}):Promise<void>;
   readMulti():Promise<{schema:number;revision:number;workspaces:string}>;
   commitMulti(options:{revision:string;workspaces:string}):Promise<{committed:boolean}>;
+  restoreMulti(options:{revision:string;workspaces:string;confirmed:true}):Promise<{committed:boolean}>;
   minimize():Promise<void>;
   sessionStatus():Promise<{unlocked:boolean;deviceSecure:boolean;biometricAvailable?:boolean}>;
   unlockBiometric():Promise<void>;
@@ -150,5 +151,11 @@ export class AndroidMultiLedgerStore implements MultiLedgerStore {
    const checked=validateMultiLedger(state);
    const workspaces=checked.workspaces.map(w=>({profile:w.profile,rows:partitionLedger(w.state)}));
    return (await bridge().commitMulti({revision:String(revision),workspaces:JSON.stringify(workspaces)})).committed===true;
+ }
+ async restoreAll(revision:number,state:MultiLedgerState){
+   if(!this.initialized||!Number.isSafeInteger(revision)||revision<0)throw new Error('دفاتر هنوز آماده نیستند.');
+   const checked=validateMultiLedger(state);
+   const workspaces=checked.workspaces.map(w=>({profile:w.profile,rows:partitionLedger(w.state)}));
+   return (await bridge().restoreMulti({revision:String(revision),workspaces:JSON.stringify(workspaces),confirmed:true})).committed===true;
  }
 }
