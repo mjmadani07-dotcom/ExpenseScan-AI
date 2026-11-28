@@ -580,3 +580,25 @@ test('full restore session requires matching preview and successful safety backu
  await s.restoreBackup(file,pass,nextPreview,async write=>{await write(async b=>{safetyBytes+=b.length;});},pass);
  assert.ok(safetyBytes>52);assert.equal(restores,1);assert.equal(state.workspaces[1].profile.id,'restored');
 });
+
+test('legacy encrypted v1 and v2 backups append only, preserving existing scopes',async()=>{
+ const {MultiLedgerSession}=await import('./multiLedgerSession');const {migrateSingleLedger,validateMultiLedger}=await import('./multiLedger');
+ const {emptyLedger}=await import('./ledgerDomain');const {encryptBackup}=await import('./portableBackup');const {writeStreamBackup}=await import('./streamBackup');
+ const d='2026-11-27T00:00:00Z',pass='synthetic password 123';
+ let state=migrateSingleLedger({ledger:emptyLedger(),draft:null},d),revision=1;
+ const store={initialize:async()=>{},read:async()=>({revision,state:structuredClone(state)}),compareAndSwap:async(expected:number,next:typeof state)=>{if(expected!==revision)return false;state=validateMultiLedger(next);revision++;return true;}};
+ const s=new MultiLedgerSession(store),ledger=emptyLedger();ledger.expenses=[{...expense,id:'legacy-doc',createdAt:d,approvedAt:d}];
+ const v1=new Blob([await encryptBackup({ledger,draft:null},pass)]);
+ const preview=await s.previewLegacyBackup(v1,pass);
+ await assert.rejects(()=>s.importLegacyBackup(v1,'wrong',preview,'Bad'));
+ assert.equal(state.workspaces.length,1);
+ await s.importLegacyBackup(v1,pass,preview,'Imported v1');
+ assert.equal(state.workspaces[1].state.ledger.expenses[0].id,'legacy-doc');
+ const chunks:Uint8Array<ArrayBuffer>[]=[];await writeStreamBackup({ledger,draft:null},pass,undefined,async b=>{chunks.push(b);});
+ const v2=new Blob(chunks),p2=await s.previewLegacyBackup(v2,pass);
+ await assert.rejects(()=>s.importLegacyBackup(v2.slice(0,v2.size-1),pass,p2,'Broken'));
+ assert.equal(state.workspaces.length,2);
+ await s.importLegacyBackup(v2,pass,p2,'Imported v2');
+ assert.equal(state.workspaces.length,3);assert.equal(state.workspaces[0].state.ledger.expenses.length,0);
+ assert.equal(state.workspaces[2].state.ledger.expenses[0].id,'legacy-doc');
+});

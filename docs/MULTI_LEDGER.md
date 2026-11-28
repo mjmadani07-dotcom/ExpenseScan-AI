@@ -44,3 +44,6 @@ Dedicated native restore path uses the exact revision, validates profiles and ro
 
 ## Phase 5C: all-ledger backup UI (internal only)
 Catalog includes an independent backup screen. Export uses verified native publication of ESBACK3. Restore displays incoming ledger identities/counts and archive/draft status, requires explicit confirmation plus repeated password, fully authenticates the archive and publishes a separate safety backup encrypted with that password before attempting revision-bound native replacement. On older Android SAF backup copy now verifies SHA-256 readback. The emulator scenario exports an archive, adds a temporary ledger, restores through the real UI, checks safety backup and both restored scopes. File selection is synthetic DataTransfer, not a physical camera/picker. Legacy import, lifecycle recovery, large archive and physical-device/signed-upgrade gates remain outstanding.
+
+## Phase 5D: legacy import
+Encrypted v1 and ESBACK2 archives are imported into a new named ledger only, using the normal append-only CAS. Full ESBACK3 replacement remains separate. Wrong password, invalid/truncated archive, duplicate names and stale revisions must not replace existing ledgers. Existing originals are staged by hash. CI and physical device tests remain required.
