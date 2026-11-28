@@ -142,20 +142,35 @@ public class LedgerWorkflowTest {
                 Thread.sleep(300);
             }while(android.os.SystemClock.elapsedRealtime()<end);
             if(!shown){diagnostics("Credential activity not displayed");fail("System credential activity not displayed");}
-            UiObject2 entry=device.findObject(By.res(Pattern.compile(".*:id/(password_entry|pinEntry|pin_entry|passwordEntry)")));
-            if(entry==null)entry=device.findObject(By.clazz("android.widget.EditText"));
-            if(entry!=null)entry.click();
-            // Android PIN views can be custom TextViews/keypads rather than EditText.
-            // Dispatch digit keys only after verifying the actual OS credential activity.
+            // The credential activity can be resumed before its PIN input/IME is ready.
+            // Wait for a real input surface; the API 35 Google IME uses content descriptions
+            // rather than the SystemUI keypad resource names.
+            UiObject2 entry=null,first=null;
+            long ready=android.os.SystemClock.elapsedRealtime()+15000;
+            do{
+                if(!credentialActivity(resumed()))fail("Credential activity disappeared before PIN input");
+                entry=device.findObject(By.res(Pattern.compile(".*:id/(password_entry|pinEntry|pin_entry|passwordEntry)")));
+                if(entry==null)entry=device.findObject(By.clazz("android.widget.EditText").focused(true));
+                first=credentialDigit(PIN.charAt(0));
+                if(first!=null||(entry!=null&&entry.isEnabled()&&entry.isFocused()))break;
+                if(entry!=null&&entry.isEnabled())entry.click();
+                Thread.sleep(250);
+            }while(android.os.SystemClock.elapsedRealtime()<ready);
+            assertTrue("System credential input never became ready",first!=null||(entry!=null&&entry.isEnabled()&&entry.isFocused()));
             for(char digit:PIN.toCharArray()){
-                if(!credentialActivity(resumed()))break;
-                UiObject2 key=device.findObject(By.res(Pattern.compile(".*:id/(key"+digit+"|digit_"+digit+")")));
-                if(key!=null)key.click();else device.pressKeyCode(KeyEvent.KEYCODE_0+(digit-'0'));
-                Thread.sleep(150);
+                if(!credentialActivity(resumed()))fail("Credential activity closed before complete PIN entry");
+                UiObject2 key=credentialDigit(digit);
+                if(key!=null)key.click();
+                else assertTrue("Unable to dispatch PIN key",device.pressKeyCode(KeyEvent.KEYCODE_0+(digit-'0')));
+                Thread.sleep(200);
             }
+            // Let automatic verification or activity transitions finish before submitting.
+            Thread.sleep(600);
             if(credentialActivity(resumed())){
                 UiObject2 enter=device.findObject(By.res(Pattern.compile(".*:id/(key_enter|keyEnter|next_button|confirm_button)")));
-                if(enter!=null&&enter.isEnabled())enter.click();else device.pressEnter();
+                if(enter==null)enter=device.findObject(By.pkg("com.google.android.inputmethod.latin").desc(Pattern.compile("(?i)done|go|next|enter|confirm")));
+                if(enter!=null&&enter.isEnabled()&&enter.isClickable())enter.click();
+                else device.pressEnter();
             }
             end=android.os.SystemClock.elapsedRealtime()+25000;
             while(credentialActivity(resumed())&&android.os.SystemClock.elapsedRealtime()<end)Thread.sleep(300);
@@ -163,6 +178,11 @@ public class LedgerWorkflowTest {
             waitFor(app,multi?"document.querySelector('h1')?.textContent.trim()==='دفاتر مالی'":"document.querySelector('nav[aria-label=\"ناوبری موبایل\"]')","App did not unlock with system credential");
             waitFor(app,"!document.body.innerText.includes('در حال بارگذاری')","Ledger loading failed");
         }catch(AssertionError|Exception ex){diagnostics("Unlock failed");throw ex;}
+    }
+    private UiObject2 credentialDigit(char digit){
+        UiObject2 key=device.findObject(By.res(Pattern.compile(".*:id/(key"+digit+"|digit_"+digit+")")));
+        if(key==null)key=device.findObject(By.pkg("com.google.android.inputmethod.latin").desc(String.valueOf(digit)).clickable(true));
+        return key!=null&&key.isEnabled()&&key.isClickable()?key:null;
     }
     private JSONObject bridge(ActivityScenario<MainActivity> app,String operation)throws Exception{
         // Use the actual production Capacitor bridge, not an alternate database or mocked auth.
